@@ -8,6 +8,20 @@ import { useAppRouter } from '../../hooks/useAppRouter'
 import { supabase } from '../../lib/supabase'
 import { Avatar } from '../../components/Avatar'
 import { usePrivacyControls, PrivacySettings } from '../../utils/privacyControls'
+import { 
+  logInfo, 
+  logWarning, 
+  logError, 
+  logSecurityEvent, 
+  measureAsync, 
+  useMonitoring 
+} from '../../utils/monitoring'
+import { 
+  runSecurityScan, 
+  testXSSInput, 
+  exportSecurityReport,
+  useSecurityTools 
+} from '../../utils/securityTools'
 
 type TabType = 'profile' | 'settings' | 'my-projects' | 'create-project' | 'browse-projects' | 'help'
 
@@ -44,6 +58,8 @@ export function DashboardScreen() {
   const { user, signOut, loading } = useAuth()
   const router = useAppRouter()
   const privacyControls = usePrivacyControls()
+  const { getStats, exportLogs, clearLogs } = useMonitoring()
+  const { runSecurityScan: scanSecurity, testXSSInput: testXSS } = useSecurityTools()
   const [hoveredButton, setHoveredButton] = useState<string | null>(null)
   const [checkingOnboarding, setCheckingOnboarding] = useState(true)
   const [activeTab, setActiveTab] = useState<TabType>('browse-projects')
@@ -59,13 +75,38 @@ export function DashboardScreen() {
   const [isSavingPrivacy, setIsSavingPrivacy] = useState(false)
   const [accountDeletionStatus, setAccountDeletionStatus] = useState<any>(null)
   const [isExportingData, setIsExportingData] = useState(false)
+  
+  // Security and monitoring state
+  const [securityScanResults, setSecurityScanResults] = useState<any>(null)
+  const [isRunningSecurityScan, setIsRunningSecurityScan] = useState(false)
+  const [xssTestInput, setXssTestInput] = useState('')
+  const [showDeveloperTools, setShowDeveloperTools] = useState(
+    process.env.NODE_ENV === 'development' || user?.email === 'ekbotse1@coastal.edu'
+  )
 
   // Authentication guard - redirect if not authenticated
   useEffect(() => {
     if (!loading && !user) {
-      console.log('🔒 User not authenticated, redirecting to home...')
+      logSecurityEvent({
+        type: 'authentication',
+        severity: 'medium',
+        details: { 
+          action: 'unauthorized_dashboard_access',
+          redirected: true,
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown'
+        },
+        timestamp: new Date().toISOString()
+      })
       router.push('/')
       return
+    }
+    
+    if (user) {
+      logInfo('Dashboard accessed successfully', {
+        userId: user.id,
+        userEmail: user.email,
+        timestamp: new Date().toISOString()
+      })
     }
   }, [user, loading, router])
 
@@ -85,13 +126,24 @@ export function DashboardScreen() {
           .single()
 
         if (error) {
-          console.error('Error checking onboarding status:', error)
+          logError({
+            message: 'Failed to check onboarding status',
+            level: 'error',
+            component: 'dashboard_onboarding',
+            userId: user?.id,
+            timestamp: new Date().toISOString(),
+            metadata: { error: error.message, code: error.code }
+          })
           setCheckingOnboarding(false)
           return
         }
 
         if (!profile?.onboarding_completed) {
-          console.log('User has not completed onboarding, redirecting...')
+          logInfo('User redirected to complete onboarding', {
+            userId: user.id,
+            profileExists: !!profile,
+            onboardingCompleted: profile?.onboarding_completed
+          })
           router.push('/onboarding')
           return
         }
@@ -102,7 +154,14 @@ export function DashboardScreen() {
         // Load privacy settings
         loadPrivacySettings()
       } catch (error) {
-        console.error('Unexpected error checking onboarding:', error)
+        logError({
+          message: 'Unexpected error during onboarding check',
+          level: 'error',
+          component: 'dashboard_onboarding',
+          userId: user?.id,
+          timestamp: new Date().toISOString(),
+          metadata: { error: error.message, stack: error.stack }
+        })
         setCheckingOnboarding(false)
       }
     }
@@ -129,7 +188,14 @@ export function DashboardScreen() {
         setAccountDeletionStatus(deletionResult)
       }
     } catch (error) {
-      console.error('Error loading privacy settings:', error)
+      logError({
+        message: 'Failed to load privacy settings',
+        level: 'error',
+        component: 'privacy_controls',
+        userId: user?.id,
+        timestamp: new Date().toISOString(),
+        metadata: { error: error.message }
+      })
     } finally {
       setIsLoadingPrivacy(false)
     }
@@ -301,21 +367,59 @@ export function DashboardScreen() {
   const handlePrivacySettingChange = async (setting: keyof PrivacySettings, value: any) => {
     if (!user || !privacySettings) return
     
+    // Log the privacy change
+    logSecurityEvent({
+      type: 'privacy_change',
+      severity: 'medium',
+      userId: user.id,
+      details: { 
+        setting, 
+        oldValue: privacySettings[setting], 
+        newValue: value 
+      },
+      timestamp: new Date().toISOString()
+    })
+    
     const updatedSettings = { ...privacySettings, [setting]: value }
     setPrivacySettings(updatedSettings)
     
-    // Save to database
+    // Measure database update performance
     setIsSavingPrivacy(true)
     try {
-      const result = await privacyControls.updatePrivacySettings(user.id, { [setting]: value })
+      const result = await measureAsync('update_privacy_settings', async () => {
+        return await privacyControls.updatePrivacySettings(user.id, { [setting]: value })
+      }, { userId: user.id, setting, value })
+      
       if (!result.success) {
         // Revert on error
         setPrivacySettings(privacySettings)
+        logError({
+          message: 'Failed to update privacy settings',
+          level: 'error',
+          component: 'privacy_controls',
+          userId: user.id,
+          timestamp: new Date().toISOString(),
+          metadata: { setting, value, error: result.error }
+        })
         Alert.alert('Error', result.error || 'Failed to update privacy settings')
+      } else {
+        logInfo('Privacy settings updated successfully', {
+          userId: user.id,
+          setting,
+          newValue: value
+        })
       }
     } catch (error) {
       // Revert on error
       setPrivacySettings(privacySettings)
+      logError({
+        message: 'Privacy settings update failed',
+        level: 'error',
+        component: 'privacy_controls',
+        userId: user.id,
+        timestamp: new Date().toISOString(),
+        metadata: { setting, value, error: error.message }
+      })
       Alert.alert('Error', 'Failed to update privacy settings')
     } finally {
       setIsSavingPrivacy(false)
@@ -398,6 +502,145 @@ export function DashboardScreen() {
     } catch (error) {
       Alert.alert('Error', 'Failed to cancel account deletion')
     }
+  }
+
+  // Security and monitoring functions
+  const handleRunSecurityScan = async () => {
+    setIsRunningSecurityScan(true)
+    
+    try {
+      logSecurityEvent({
+        type: 'suspicious_activity',
+        severity: 'low',
+        userId: user?.id,
+        details: { action: 'manual_security_scan_initiated' },
+        timestamp: new Date().toISOString()
+      })
+      
+      const report = await runSecurityScan()
+      setSecurityScanResults(report)
+      
+      // Alert for critical issues
+      if (report.criticalIssues > 0) {
+        Alert.alert('🚨 Critical Security Issues', `Found ${report.criticalIssues} critical security issues. Check the console for details.`)
+      }
+      
+      // Export report automatically
+      exportSecurityReport(report)
+      
+      logSecurityEvent({
+        type: 'suspicious_activity',
+        severity: 'low',
+        userId: user?.id,
+        details: { 
+          action: 'security_scan_completed',
+          totalIssues: report.totalIssues,
+          criticalIssues: report.criticalIssues
+        },
+        timestamp: new Date().toISOString()
+      })
+      
+    } catch (error) {
+      logError({
+        message: 'Security scan failed',
+        level: 'error',
+        component: 'security_tools',
+        userId: user?.id,
+        timestamp: new Date().toISOString(),
+        metadata: { error: error.message }
+      })
+    } finally {
+      setIsRunningSecurityScan(false)
+    }
+  }
+
+  const handleTestXSSInput = () => {
+    if (!xssTestInput.trim()) return
+    
+    const results = testXSSInput(xssTestInput)
+    
+    if (results.length > 0) {
+      Alert.alert('⚠️ XSS Vulnerabilities', `Detected ${results.length} potential XSS vulnerabilities. Check console for details.`)
+      logWarning('XSS vulnerabilities detected in test input', {
+        input: xssTestInput,
+        vulnerabilities: results,
+        userId: user?.id
+      })
+    } else {
+      Alert.alert('✅ Input Safe', 'No XSS vulnerabilities detected in the test input.')
+      logInfo('XSS test passed - input appears safe', {
+        input: xssTestInput,
+        userId: user?.id
+      })
+    }
+  }
+
+  const handleExportLogs = () => {
+    try {
+      const logs = exportLogs()
+      const logData = JSON.parse(logs)
+      
+      // Create downloadable file
+      const dataStr = JSON.stringify(logData, null, 2)
+      const dataBlob = new Blob([dataStr], { type: 'application/json' })
+      const url = URL.createObjectURL(dataBlob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `devrecruit-logs-${new Date().toISOString().split('T')[0]}.json`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      
+      Alert.alert('Success', 'Logs exported and downloaded successfully.')
+      
+      logInfo('Logs exported by user', {
+        userId: user?.id,
+        logCount: logData.length
+      })
+    } catch (error) {
+      Alert.alert('Error', 'Failed to export logs')
+      logError({
+        message: 'Failed to export logs',
+        level: 'error',
+        component: 'monitoring',
+        userId: user?.id,
+        timestamp: new Date().toISOString(),
+        metadata: { error: error.message }
+      })
+    }
+  }
+
+  const handleViewStats = () => {
+    const stats = getStats()
+    Alert.alert(
+      '📊 Monitoring Stats',
+      `Total Logs: ${stats.totalLogs}\nErrors: ${stats.errorCount}\nWarnings: ${stats.warningCount}\nSecurity Events: ${stats.securityEventCount}\nPerformance Alerts: ${stats.performanceAlertCount}`
+    )
+    
+    logInfo('Monitoring stats viewed', {
+      userId: user?.id,
+      stats
+    })
+  }
+
+  const handleClearLogs = () => {
+    Alert.alert(
+      'Clear Logs',
+      'Are you sure you want to clear all monitoring logs?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: () => {
+            clearLogs()
+            Alert.alert('Success', 'All logs have been cleared.')
+            logInfo('Logs cleared by user', { userId: user?.id })
+          }
+        }
+      ]
+    )
   }
 
   // Helper function to render toggle switches
@@ -1342,6 +1585,225 @@ export function DashboardScreen() {
                     </View>
                   </View>
 
+                  {/* Developer Tools */}
+                  {showDeveloperTools && (
+                    <View style={{
+                      backgroundColor: '#ffffff',
+                      borderRadius: 16,
+                      padding: 24,
+                      borderWidth: 1,
+                      borderColor: '#e2e8f0',
+                      gap: 20
+                    }}>
+                      <View style={{ gap: 8 }}>
+                        <Text style={{ fontSize: 18, fontWeight: '700', color: '#374151' }}>
+                          🛠️ Developer Tools
+                        </Text>
+                        <Text style={{ fontSize: 14, color: '#64748b' }}>
+                          Security scanning and monitoring tools for development
+                        </Text>
+                      </View>
+                      
+                      {/* Security Scan Section */}
+                      <View style={{
+                        backgroundColor: '#f8fafc',
+                        borderRadius: 12,
+                        padding: 16,
+                        borderWidth: 1,
+                        borderColor: '#e2e8f0',
+                        gap: 12
+                      }}>
+                        <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151' }}>
+                          🔍 Security Scan
+                        </Text>
+                        <Text style={{ fontSize: 14, color: '#64748b' }}>
+                          Run comprehensive security checks on the application
+                        </Text>
+                        
+                        <Pressable
+                          onPress={handleRunSecurityScan}
+                          disabled={isRunningSecurityScan}
+                          style={{
+                            backgroundColor: isRunningSecurityScan ? '#94a3b8' : '#667eea',
+                            paddingHorizontal: 16,
+                            paddingVertical: 10,
+                            borderRadius: 8,
+                            alignSelf: 'flex-start',
+                            opacity: isRunningSecurityScan ? 0.7 : 1
+                          }}
+                        >
+                          <Text style={{ color: '#ffffff', fontWeight: '600' }}>
+                            {isRunningSecurityScan ? 'Scanning...' : 'Run Security Scan'}
+                          </Text>
+                        </Pressable>
+                        
+                        {securityScanResults && (
+                          <View style={{
+                            backgroundColor: '#f1f5f9',
+                            borderRadius: 8,
+                            padding: 12,
+                            gap: 8
+                          }}>
+                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151' }}>
+                              📋 Scan Results
+                            </Text>
+                            <Text style={{ fontSize: 12, color: '#64748b' }}>
+                              Total Issues: {securityScanResults.totalIssues} | 
+                              Critical: {securityScanResults.criticalIssues} | 
+                              High: {securityScanResults.highIssues} | 
+                              Medium: {securityScanResults.mediumIssues} | 
+                              Low: {securityScanResults.lowIssues}
+                            </Text>
+                            <Text style={{ fontSize: 12, color: '#64748b' }}>
+                              {securityScanResults.summary}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      
+                      {/* XSS Testing Section */}
+                      <View style={{
+                        backgroundColor: '#f8fafc',
+                        borderRadius: 12,
+                        padding: 16,
+                        borderWidth: 1,
+                        borderColor: '#e2e8f0',
+                        gap: 12
+                      }}>
+                        <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151' }}>
+                          🧪 XSS Input Testing
+                        </Text>
+                        <Text style={{ fontSize: 14, color: '#64748b' }}>
+                          Test inputs for potential XSS vulnerabilities
+                        </Text>
+                        
+                        <TextInput
+                          value={xssTestInput}
+                          onChangeText={setXssTestInput}
+                          placeholder="Enter input to test for XSS..."
+                          style={{
+                            borderWidth: 1,
+                            borderColor: '#d1d5db',
+                            borderRadius: 8,
+                            paddingHorizontal: 12,
+                            paddingVertical: 8,
+                            fontSize: 14,
+                            backgroundColor: '#ffffff'
+                          }}
+                        />
+                        
+                        <Pressable
+                          onPress={handleTestXSSInput}
+                          disabled={!xssTestInput.trim()}
+                          style={{
+                            backgroundColor: xssTestInput.trim() ? '#10b981' : '#94a3b8',
+                            paddingHorizontal: 16,
+                            paddingVertical: 8,
+                            borderRadius: 8,
+                            alignSelf: 'flex-start',
+                            opacity: xssTestInput.trim() ? 1 : 0.7
+                          }}
+                        >
+                          <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 14 }}>
+                            Test Input
+                          </Text>
+                        </Pressable>
+                        
+                        <Text style={{ fontSize: 12, color: '#6b7280' }}>
+                          Try inputs like: &lt;script&gt;alert('xss')&lt;/script&gt; or javascript:alert('xss')
+                        </Text>
+                      </View>
+                      
+                      {/* Monitoring Tools Section */}
+                      <View style={{
+                        backgroundColor: '#f8fafc',
+                        borderRadius: 12,
+                        padding: 16,
+                        borderWidth: 1,
+                        borderColor: '#e2e8f0',
+                        gap: 12
+                      }}>
+                        <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151' }}>
+                          📊 Monitoring Tools
+                        </Text>
+                        <Text style={{ fontSize: 14, color: '#64748b' }}>
+                          View logs, statistics, and export monitoring data
+                        </Text>
+                        
+                        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                          <Pressable
+                            onPress={handleViewStats}
+                            style={{
+                              backgroundColor: '#3b82f6',
+                              paddingHorizontal: 12,
+                              paddingVertical: 8,
+                              borderRadius: 6
+                            }}
+                          >
+                            <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 12 }}>
+                              View Stats
+                            </Text>
+                          </Pressable>
+                          
+                          <Pressable
+                            onPress={handleExportLogs}
+                            style={{
+                              backgroundColor: '#059669',
+                              paddingHorizontal: 12,
+                              paddingVertical: 8,
+                              borderRadius: 6
+                            }}
+                          >
+                            <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 12 }}>
+                              Export Logs
+                            </Text>
+                          </Pressable>
+                          
+                          <Pressable
+                            onPress={handleClearLogs}
+                            style={{
+                              backgroundColor: '#dc2626',
+                              paddingHorizontal: 12,
+                              paddingVertical: 8,
+                              borderRadius: 6
+                            }}
+                          >
+                            <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 12 }}>
+                              Clear Logs
+                            </Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                      
+                      {/* Toggle Developer Tools */}
+                      <View style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        paddingTop: 12,
+                        borderTopWidth: 1,
+                        borderTopColor: '#e2e8f0'
+                      }}>
+                        <Text style={{ fontSize: 14, color: '#64748b' }}>
+                          Hide developer tools
+                        </Text>
+                        <Pressable
+                          onPress={() => setShowDeveloperTools(false)}
+                          style={{
+                            backgroundColor: '#6b7280',
+                            paddingHorizontal: 12,
+                            paddingVertical: 6,
+                            borderRadius: 6
+                          }}
+                        >
+                          <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 12 }}>
+                            Hide
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  )}
+
                   {/* Security Information */}
                   <View style={{
                     backgroundColor: '#f0f9ff',
@@ -1362,6 +1824,25 @@ export function DashboardScreen() {
                       All settings are saved automatically and take effect immediately. 
                       You can change these settings at any time.
                     </Text>
+                    
+                    {/* Show Developer Tools Toggle for Admin Users */}
+                    {!showDeveloperTools && (process.env.NODE_ENV === 'development' || user?.email === 'ekbotse1@coastal.edu') && (
+                      <Pressable
+                        onPress={() => setShowDeveloperTools(true)}
+                        style={{
+                          backgroundColor: '#0369a1',
+                          paddingHorizontal: 12,
+                          paddingVertical: 8,
+                          borderRadius: 6,
+                          alignSelf: 'flex-start',
+                          marginTop: 8
+                        }}
+                      >
+                        <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 12 }}>
+                          Show Developer Tools
+                        </Text>
+                      </Pressable>
+                    )}
                   </View>
                 </>
               )}
