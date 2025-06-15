@@ -3,8 +3,10 @@
 import { TextLink } from 'solito/link'
 import { Text, View, ScrollView, Pressable, TextInput } from 'react-native'
 import { useState } from 'react'
+import { useAuth } from '../../provider/auth'
 
 export function HomeScreen() {
+  const { user, loading } = useAuth()
   const [searchText, setSearchText] = useState('')
   const [hoveredCard, setHoveredCard] = useState<number | null>(null)
   const [hoveredCategory, setHoveredCategory] = useState<number | null>(null)
@@ -131,61 +133,98 @@ export function HomeScreen() {
         
         {/* Right Navigation */}
         <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
-          <Pressable
-            onHoverIn={() => setHoveredNavItem('signin')}
-            onHoverOut={() => setHoveredNavItem(null)}
-            style={{
-              paddingHorizontal: 20,
-              paddingVertical: 10,
-              borderRadius: 12,
-              backgroundColor: hoveredNavItem === 'signin' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
-              // @ts-ignore - React Native Web transitions
-              transition: 'all 0.2s ease-in-out',
-              transform: [{ scale: hoveredNavItem === 'signin' ? 1.02 : 1 }]
-            }}
-          >
-          <TextLink href="/signin" style={{ 
-              color: hoveredNavItem === 'signin' ? '#374151' : '#64748b', 
-            fontSize: 15, 
-              fontWeight: '600',
-              textDecorationLine: 'none',
-              // @ts-ignore - React Native Web transition
-              transition: 'color 0.2s ease-in-out'
-          }}>
-            Log In
-          </TextLink>
-          </Pressable>
-          
-          <Pressable
-            onHoverIn={() => setHoveredNavItem('signup')}
-            onHoverOut={() => setHoveredNavItem(null)}
-            style={{
-              backgroundColor: hoveredNavItem === 'signup' ? '#5b6cf0' : '#667eea',
-              paddingHorizontal: 24,
-              paddingVertical: 12,
-              borderRadius: 12,
-              shadowColor: '#667eea',
-              shadowOffset: { width: 0, height: hoveredNavItem === 'signup' ? 6 : 4 },
-              shadowOpacity: hoveredNavItem === 'signup' ? 0.3 : 0.2,
-              shadowRadius: hoveredNavItem === 'signup' ? 12 : 8,
-              elevation: hoveredNavItem === 'signup' ? 6 : 4,
-              // @ts-ignore - React Native Web transitions
-              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-              transform: [{ 
-                scale: hoveredNavItem === 'signup' ? 1.05 : 1,
-                translateY: hoveredNavItem === 'signup' ? -2 : 0
-              }]
-            }}
-          >
-            <TextLink href="/join" style={{ 
-              color: '#ffffff', 
-              fontSize: 15, 
-              fontWeight: '700',
-              textDecorationLine: 'none'
-            }}>
-              Join Beta
-            </TextLink>
-          </Pressable>
+          {user ? (
+            // Logged in - Show Dashboard button
+            <Pressable
+              onHoverIn={() => setHoveredNavItem('dashboard')}
+              onHoverOut={() => setHoveredNavItem(null)}
+              style={{
+                backgroundColor: hoveredNavItem === 'dashboard' ? '#5b6cf0' : '#667eea',
+                paddingHorizontal: 24,
+                paddingVertical: 12,
+                borderRadius: 12,
+                shadowColor: '#667eea',
+                shadowOffset: { width: 0, height: hoveredNavItem === 'dashboard' ? 6 : 4 },
+                shadowOpacity: hoveredNavItem === 'dashboard' ? 0.3 : 0.2,
+                shadowRadius: hoveredNavItem === 'dashboard' ? 12 : 8,
+                elevation: hoveredNavItem === 'dashboard' ? 6 : 4,
+                // @ts-ignore - React Native Web transitions
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                transform: [{ 
+                  scale: hoveredNavItem === 'dashboard' ? 1.05 : 1,
+                  translateY: hoveredNavItem === 'dashboard' ? -2 : 0
+                }]
+              }}
+            >
+              <TextLink href="/dashboard" style={{ 
+                color: '#ffffff', 
+                fontSize: 15, 
+                fontWeight: '700',
+                textDecorationLine: 'none'
+              }}>
+                Dashboard
+              </TextLink>
+            </Pressable>
+          ) : (
+            // Not logged in - Show Log In and Join Beta buttons
+            <>
+              <Pressable
+                onHoverIn={() => setHoveredNavItem('signin')}
+                onHoverOut={() => setHoveredNavItem(null)}
+                style={{
+                  paddingHorizontal: 20,
+                  paddingVertical: 10,
+                  borderRadius: 12,
+                  backgroundColor: hoveredNavItem === 'signin' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
+                  // @ts-ignore - React Native Web transitions
+                  transition: 'all 0.2s ease-in-out',
+                  transform: [{ scale: hoveredNavItem === 'signin' ? 1.02 : 1 }]
+                }}
+              >
+                <TextLink href="/signin" style={{ 
+                  color: hoveredNavItem === 'signin' ? '#374151' : '#64748b', 
+                  fontSize: 15, 
+                  fontWeight: '600',
+                  textDecorationLine: 'none',
+                  // @ts-ignore - React Native Web transition
+                  transition: 'color 0.2s ease-in-out'
+                }}>
+                  Log In
+                </TextLink>
+              </Pressable>
+              
+              <Pressable
+                onHoverIn={() => setHoveredNavItem('signup')}
+                onHoverOut={() => setHoveredNavItem(null)}
+                style={{
+                  backgroundColor: hoveredNavItem === 'signup' ? '#5b6cf0' : '#667eea',
+                  paddingHorizontal: 24,
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  shadowColor: '#667eea',
+                  shadowOffset: { width: 0, height: hoveredNavItem === 'signup' ? 6 : 4 },
+                  shadowOpacity: hoveredNavItem === 'signup' ? 0.3 : 0.2,
+                  shadowRadius: hoveredNavItem === 'signup' ? 12 : 8,
+                  elevation: hoveredNavItem === 'signup' ? 6 : 4,
+                  // @ts-ignore - React Native Web transitions
+                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                  transform: [{ 
+                    scale: hoveredNavItem === 'signup' ? 1.05 : 1,
+                    translateY: hoveredNavItem === 'signup' ? -2 : 0
+                  }]
+                }}
+              >
+                <TextLink href="/join" style={{ 
+                  color: '#ffffff', 
+                  fontSize: 15, 
+                  fontWeight: '700',
+                  textDecorationLine: 'none'
+                }}>
+                  Join Beta
+                </TextLink>
+              </Pressable>
+            </>
+          )}
         </View>
       </View>
 
@@ -305,7 +344,7 @@ export function HomeScreen() {
                   ]
                 }}
               >
-                <TextLink href="/join" style={{
+                <TextLink href={user ? "/dashboard" : "/signin"} style={{
                   color: '#ffffff',
                   fontSize: 15,
                   fontWeight: '700',
@@ -339,7 +378,7 @@ export function HomeScreen() {
                   ]
                 }}
               >
-                <TextLink href="/browse" style={{
+                <TextLink href={user ? "/dashboard" : "/browse"} style={{
                   color: hoveredButton === 'secondary-cta' ? '#667eea' : '#64748b',
                   fontSize: 15,
                   fontWeight: '600',
