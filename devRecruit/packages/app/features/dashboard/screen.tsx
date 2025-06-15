@@ -1,13 +1,74 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { View, Text, Pressable, ScrollView } from 'react-native'
 import { useAuth } from '../../provider/auth'
 import { TextLink } from 'solito/link'
+import { useAppRouter } from '../../hooks/useAppRouter'
+import { supabase } from '../../lib/supabase'
 
 export function DashboardScreen() {
   const { user, signOut, loading } = useAuth()
+  const router = useAppRouter()
   const [hoveredButton, setHoveredButton] = useState<string | null>(null)
+  const [checkingOnboarding, setCheckingOnboarding] = useState(true)
+
+  // Check if user has completed onboarding
+  useEffect(() => {
+    const checkOnboardingStatus = async () => {
+      if (!user) {
+        setCheckingOnboarding(false)
+        return
+      }
+
+      try {
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('onboarding_completed')
+          .eq('id', user.id)
+          .single()
+
+        if (error) {
+          console.error('Error checking onboarding status:', error)
+          setCheckingOnboarding(false)
+          return
+        }
+
+        if (!profile?.onboarding_completed) {
+          console.log('User has not completed onboarding, redirecting...')
+          router.push('/onboarding')
+          return
+        }
+
+        setCheckingOnboarding(false)
+      } catch (error) {
+        console.error('Unexpected error checking onboarding:', error)
+        setCheckingOnboarding(false)
+      }
+    }
+
+    checkOnboardingStatus()
+  }, [user, router])
+
+  // Show loading while checking onboarding status
+  if (checkingOnboarding) {
+    return (
+      <View style={{
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#fafbfc'
+      }}>
+        <Text style={{
+          fontSize: 18,
+          color: '#64748b',
+          fontWeight: '500'
+        }}>
+          Loading dashboard...
+        </Text>
+      </View>
+    )
+  }
 
   const handleSignOut = async () => {
     try {

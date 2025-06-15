@@ -728,7 +728,7 @@ export function HomeScreen() {
                           fontWeight: '500',
                           textAlign: 'center'
                         }}>
-                          {Math.floor(Math.random() * 500) + 200}+ devs
+                          {[450, 380, 520, 290, 340, 410, 360, 480, 320, 390][index] || 350}+ devs
                         </Text>
                       </View>
                     </Pressable>
@@ -989,7 +989,7 @@ export function HomeScreen() {
                       fontSize: 11,
                       fontWeight: '600'
                     }}>
-                      {Math.floor(Math.random() * 150) + 50}+ projects
+                      {[120, 95, 78, 110, 65, 85][index] || 90}+ projects
                     </Text>
                   </View>
                 </View>
