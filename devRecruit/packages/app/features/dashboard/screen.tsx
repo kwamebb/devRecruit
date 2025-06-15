@@ -6,6 +6,7 @@ import { useAuth } from '../../provider/auth'
 import { TextLink } from 'solito/link'
 import { useAppRouter } from '../../hooks/useAppRouter'
 import { supabase } from '../../lib/supabase'
+import { Avatar } from '../../components/Avatar'
 
 type TabType = 'profile' | 'settings' | 'my-projects' | 'create-project' | 'browse-projects' | 'help'
 
@@ -172,6 +173,7 @@ export function DashboardScreen() {
           age: age,
           education_status: editedProfile.education_status,
           coding_languages: editedProfile.coding_languages,
+          avatar_url: editedProfile.avatar_url,
           updated_at: new Date().toISOString()
         })
         .eq('id', user.id)
@@ -191,6 +193,36 @@ export function DashboardScreen() {
       console.error('Unexpected error updating profile:', error)
     } finally {
       setIsSavingProfile(false)
+    }
+  }
+
+  const handleAvatarUpdate = async (newAvatarUrl: string) => {
+    if (!user) return
+
+    try {
+      // Update database
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          avatar_url: newAvatarUrl,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', user.id)
+
+      if (error) {
+        console.error('Avatar update error:', error)
+        return
+      }
+
+      // Update local state
+      setUserProfile(prev => ({ ...prev, avatar_url: newAvatarUrl }))
+      if (editedProfile) {
+        setEditedProfile(prev => ({ ...prev, avatar_url: newAvatarUrl }))
+      }
+      
+      console.log('✅ Avatar updated successfully!')
+    } catch (error) {
+      console.error('Unexpected error updating avatar:', error)
     }
   }
 
@@ -285,18 +317,15 @@ export function DashboardScreen() {
               }}>
                 {/* Profile Header */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-                  <View style={{
-                    width: 64,
-                    height: 64,
-                    backgroundColor: '#667eea',
-                    borderRadius: 32,
-                    justifyContent: 'center',
-                    alignItems: 'center'
-                  }}>
-                    <Text style={{ fontSize: 24, color: '#ffffff', fontWeight: 'bold' }}>
-                      {(isEditingProfile ? editedProfile?.full_name : userProfile.full_name)?.charAt(0) || '👤'}
-                    </Text>
-                  </View>
+                  <Avatar
+                    src={isEditingProfile ? editedProfile?.avatar_url : userProfile.avatar_url}
+                    name={isEditingProfile ? editedProfile?.full_name : userProfile.full_name}
+                    username={isEditingProfile ? editedProfile?.username : userProfile.username}
+                    size={64}
+                    showEditIcon={true}
+                    onAvatarUpdate={handleAvatarUpdate}
+                    userId={user?.id}
+                  />
                   <View style={{ flex: 1 }}>
                     {isEditingProfile ? (
                       <View style={{ gap: 8 }}>
@@ -865,18 +894,15 @@ export function DashboardScreen() {
             gap: 12
           }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View style={{
-                width: 40,
-                height: 40,
-                backgroundColor: '#667eea',
-                borderRadius: 20,
-                justifyContent: 'center',
-                alignItems: 'center'
-              }}>
-                <Text style={{ fontSize: 16, color: '#ffffff', fontWeight: 'bold' }}>
-                  {userProfile.full_name?.charAt(0) || '👤'}
-                </Text>
-              </View>
+              <Avatar
+                src={userProfile.avatar_url}
+                name={userProfile.full_name}
+                username={userProfile.username}
+                size={40}
+                showEditIcon={false}
+                onAvatarUpdate={handleAvatarUpdate}
+                userId={user?.id}
+              />
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151' }}>
                   {userProfile.full_name}
