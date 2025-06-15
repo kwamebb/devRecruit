@@ -158,12 +158,12 @@ export function HomeScreen() {
             >
               <TextLink href="/dashboard" style={{ 
                 color: '#ffffff', 
-                fontSize: 15, 
+            fontSize: 15, 
                 fontWeight: '700',
-                textDecorationLine: 'none'
-              }}>
+            textDecorationLine: 'none'
+          }}>
                 Dashboard
-              </TextLink>
+          </TextLink>
             </Pressable>
           ) : (
             // Not logged in - Show Log In and Join Beta buttons
@@ -181,16 +181,16 @@ export function HomeScreen() {
                   transform: [{ scale: hoveredNavItem === 'signin' ? 1.02 : 1 }]
                 }}
               >
-                <TextLink href="/signin" style={{ 
+          <TextLink href="/signin" style={{ 
                   color: hoveredNavItem === 'signin' ? '#374151' : '#64748b', 
-                  fontSize: 15, 
+            fontSize: 15, 
                   fontWeight: '600',
                   textDecorationLine: 'none',
                   // @ts-ignore - React Native Web transition
                   transition: 'color 0.2s ease-in-out'
-                }}>
-                  Log In
-                </TextLink>
+          }}>
+            Log In
+          </TextLink>
               </Pressable>
               
               <Pressable
@@ -214,14 +214,14 @@ export function HomeScreen() {
                   }]
                 }}
               >
-                <TextLink href="/join" style={{ 
-                  color: '#ffffff', 
-                  fontSize: 15, 
+            <TextLink href="/join" style={{ 
+              color: '#ffffff', 
+              fontSize: 15, 
                   fontWeight: '700',
-                  textDecorationLine: 'none'
-                }}>
+              textDecorationLine: 'none'
+            }}>
                   Join Beta
-                </TextLink>
+            </TextLink>
               </Pressable>
             </>
           )}
