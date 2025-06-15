@@ -1,12 +1,13 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { View, Text, Pressable, ScrollView, TextInput } from 'react-native'
+import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native'
 import { useAuth } from '../../provider/auth'
 import { TextLink } from 'solito/link'
 import { useAppRouter } from '../../hooks/useAppRouter'
 import { supabase } from '../../lib/supabase'
 import { Avatar } from '../../components/Avatar'
+import { usePrivacyControls, PrivacySettings } from '../../utils/privacyControls'
 
 type TabType = 'profile' | 'settings' | 'my-projects' | 'create-project' | 'browse-projects' | 'help'
 
@@ -42,6 +43,7 @@ const EDUCATION_OPTIONS = [
 export function DashboardScreen() {
   const { user, signOut, loading } = useAuth()
   const router = useAppRouter()
+  const privacyControls = usePrivacyControls()
   const [hoveredButton, setHoveredButton] = useState<string | null>(null)
   const [checkingOnboarding, setCheckingOnboarding] = useState(true)
   const [activeTab, setActiveTab] = useState<TabType>('browse-projects')
@@ -50,6 +52,13 @@ export function DashboardScreen() {
   const [editedProfile, setEditedProfile] = useState<any>(null)
   const [isSavingProfile, setIsSavingProfile] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
+  
+  // Privacy settings state
+  const [privacySettings, setPrivacySettings] = useState<PrivacySettings | null>(null)
+  const [isLoadingPrivacy, setIsLoadingPrivacy] = useState(false)
+  const [isSavingPrivacy, setIsSavingPrivacy] = useState(false)
+  const [accountDeletionStatus, setAccountDeletionStatus] = useState<any>(null)
+  const [isExportingData, setIsExportingData] = useState(false)
 
   // Authentication guard - redirect if not authenticated
   useEffect(() => {
@@ -89,6 +98,9 @@ export function DashboardScreen() {
 
         setUserProfile(profile)
         setCheckingOnboarding(false)
+        
+        // Load privacy settings
+        loadPrivacySettings()
       } catch (error) {
         console.error('Unexpected error checking onboarding:', error)
         setCheckingOnboarding(false)
@@ -97,6 +109,31 @@ export function DashboardScreen() {
 
     checkOnboardingStatus()
   }, [user, router])
+
+  // Load privacy settings
+  const loadPrivacySettings = async () => {
+    if (!user) return
+    
+    setIsLoadingPrivacy(true)
+    try {
+      const [settingsResult, deletionResult] = await Promise.all([
+        privacyControls.getPrivacySettings(user.id),
+        privacyControls.getAccountDeletionStatus(user.id)
+      ])
+      
+      if (settingsResult.success) {
+        setPrivacySettings(settingsResult.settings!)
+      }
+      
+      if (deletionResult.success) {
+        setAccountDeletionStatus(deletionResult)
+      }
+    } catch (error) {
+      console.error('Error loading privacy settings:', error)
+    } finally {
+      setIsLoadingPrivacy(false)
+    }
+  }
 
   // Show loading while auth is loading or checking onboarding status
   if (loading || checkingOnboarding) {
@@ -259,6 +296,138 @@ export function DashboardScreen() {
       editedProfile.coding_languages.length > 0
     )
   }
+
+  // Privacy control handlers
+  const handlePrivacySettingChange = async (setting: keyof PrivacySettings, value: any) => {
+    if (!user || !privacySettings) return
+    
+    const updatedSettings = { ...privacySettings, [setting]: value }
+    setPrivacySettings(updatedSettings)
+    
+    // Save to database
+    setIsSavingPrivacy(true)
+    try {
+      const result = await privacyControls.updatePrivacySettings(user.id, { [setting]: value })
+      if (!result.success) {
+        // Revert on error
+        setPrivacySettings(privacySettings)
+        Alert.alert('Error', result.error || 'Failed to update privacy settings')
+      }
+    } catch (error) {
+      // Revert on error
+      setPrivacySettings(privacySettings)
+      Alert.alert('Error', 'Failed to update privacy settings')
+    } finally {
+      setIsSavingPrivacy(false)
+    }
+  }
+
+  const handleDataExport = async () => {
+    if (!user) return
+    
+    setIsExportingData(true)
+    try {
+      const result = await privacyControls.exportUserData(user.id)
+      if (result.success && result.data) {
+        // Create downloadable file
+        const dataStr = JSON.stringify(result.data, null, 2)
+        const dataBlob = new Blob([dataStr], { type: 'application/json' })
+        const url = URL.createObjectURL(dataBlob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `devrecruit-data-export-${new Date().toISOString().split('T')[0]}.json`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+        
+        Alert.alert('Success', 'Your data has been exported and downloaded.')
+      } else {
+        Alert.alert('Error', result.error || 'Failed to export data')
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to export data')
+    } finally {
+      setIsExportingData(false)
+    }
+  }
+
+  const handleAccountDeletion = async () => {
+    if (!user) return
+    
+    Alert.alert(
+      'Delete Account',
+      'Are you sure you want to delete your account? This action cannot be undone. Your account will be scheduled for deletion with a 30-day grace period.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Account',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const result = await privacyControls.requestAccountDeletion(user.id, 'User requested deletion')
+              if (result.success) {
+                Alert.alert(
+                  'Account Deletion Scheduled',
+                  `Your account has been scheduled for deletion on ${new Date(result.deletionDate!).toLocaleDateString()}. You can cancel this request within 30 days.`
+                )
+                loadPrivacySettings() // Refresh status
+              } else {
+                Alert.alert('Error', result.error || 'Failed to schedule account deletion')
+              }
+            } catch (error) {
+              Alert.alert('Error', 'Failed to schedule account deletion')
+            }
+          }
+        }
+      ]
+    )
+  }
+
+  const handleCancelAccountDeletion = async () => {
+    if (!user) return
+    
+    try {
+      const result = await privacyControls.cancelAccountDeletion(user.id)
+      if (result.success) {
+        Alert.alert('Success', 'Account deletion has been cancelled.')
+        loadPrivacySettings() // Refresh status
+      } else {
+        Alert.alert('Error', result.error || 'Failed to cancel account deletion')
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to cancel account deletion')
+    }
+  }
+
+  // Helper function to render toggle switches
+  const renderToggleSwitch = (isEnabled: boolean, onToggle: () => void, disabled: boolean = false) => (
+    <Pressable
+      onPress={disabled ? undefined : onToggle}
+      style={{
+        width: 48,
+        height: 24,
+        backgroundColor: isEnabled ? '#667eea' : '#e2e8f0',
+        borderRadius: 12,
+        justifyContent: 'center',
+        alignItems: isEnabled ? 'flex-end' : 'flex-start',
+        paddingHorizontal: 2,
+        opacity: disabled ? 0.5 : 1
+      }}
+    >
+      <View style={{
+        width: 20,
+        height: 20,
+        backgroundColor: '#ffffff',
+        borderRadius: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+        elevation: 2
+      }} />
+    </Pressable>
+  )
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -720,99 +889,484 @@ export function DashboardScreen() {
 
       case 'settings':
         return (
-          <View style={{ gap: 24 }}>
-            <View style={{ gap: 16 }}>
-              <Text style={{ fontSize: 28, fontWeight: '800', color: '#0f172a' }}>
-                Settings
-              </Text>
-              <Text style={{ fontSize: 16, color: '#64748b', lineHeight: 24 }}>
-                Manage your account preferences
-              </Text>
-            </View>
-
-            <View style={{
-              backgroundColor: '#ffffff',
-              borderRadius: 16,
-              padding: 24,
-              borderWidth: 1,
-              borderColor: '#e2e8f0',
-              gap: 20
-            }}>
+          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+            <View style={{ gap: 24, paddingBottom: 40 }}>
               <View style={{ gap: 16 }}>
-                <Text style={{ fontSize: 18, fontWeight: '700', color: '#374151' }}>
-                  Account Settings
+                <Text style={{ fontSize: 28, fontWeight: '800', color: '#0f172a' }}>
+                  Settings & Privacy
                 </Text>
-                
-                <View style={{ gap: 12 }}>
+                <Text style={{ fontSize: 16, color: '#64748b', lineHeight: 24 }}>
+                  Manage your account preferences, privacy settings, and data controls
+                </Text>
+              </View>
+
+              {isLoadingPrivacy ? (
+                <View style={{
+                  backgroundColor: '#ffffff',
+                  borderRadius: 16,
+                  padding: 24,
+                  borderWidth: 1,
+                  borderColor: '#e2e8f0',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minHeight: 200
+                }}>
+                  <Text style={{ fontSize: 16, color: '#64748b' }}>Loading privacy settings...</Text>
+                </View>
+              ) : (
+                <>
+                  {/* Account Deletion Warning */}
+                  {accountDeletionStatus?.status === 'pending' && (
+                    <View style={{
+                      backgroundColor: '#fef2f2',
+                      borderRadius: 16,
+                      padding: 20,
+                      borderWidth: 2,
+                      borderColor: '#fecaca',
+                      gap: 12
+                    }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Text style={{ fontSize: 20 }}>⚠️</Text>
+                        <Text style={{ fontSize: 18, fontWeight: '700', color: '#dc2626' }}>
+                          Account Deletion Scheduled
+                        </Text>
+                      </View>
+                      <Text style={{ fontSize: 14, color: '#7f1d1d', lineHeight: 20 }}>
+                        Your account is scheduled for deletion on {new Date(accountDeletionStatus.scheduledDate).toLocaleDateString()}.
+                        You have {accountDeletionStatus.daysRemaining} days remaining to cancel this request.
+                      </Text>
+                      <Pressable
+                        onPress={handleCancelAccountDeletion}
+                        style={{
+                          backgroundColor: '#dc2626',
+                          paddingHorizontal: 16,
+                          paddingVertical: 10,
+                          borderRadius: 8,
+                          alignSelf: 'flex-start'
+                        }}
+                      >
+                        <Text style={{ color: '#ffffff', fontWeight: '600' }}>
+                          Cancel Deletion
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )}
+
+                  {/* Privacy Settings */}
                   <View style={{
-                    flexDirection: 'row',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    paddingVertical: 12,
-                    borderBottomWidth: 1,
-                    borderBottomColor: '#f1f5f9'
+                    backgroundColor: '#ffffff',
+                    borderRadius: 16,
+                    padding: 24,
+                    borderWidth: 1,
+                    borderColor: '#e2e8f0',
+                    gap: 20
                   }}>
-                    <View>
-                      <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151' }}>
-                        Email Notifications
+                    <View style={{ gap: 8 }}>
+                      <Text style={{ fontSize: 18, fontWeight: '700', color: '#374151' }}>
+                        🔒 Privacy Settings
                       </Text>
                       <Text style={{ fontSize: 14, color: '#64748b' }}>
-                        Receive updates about your projects
+                        Control how your information is shared and displayed
                       </Text>
                     </View>
-                    <View style={{
-                      width: 48,
-                      height: 24,
-                      backgroundColor: '#667eea',
-                      borderRadius: 12,
-                      justifyContent: 'center',
-                      alignItems: 'flex-end',
-                      paddingHorizontal: 2
-                    }}>
+                    
+                    {privacySettings && (
+                      <View style={{ gap: 16 }}>
+                        {/* Profile Visibility */}
+                        <View style={{
+                          paddingVertical: 12,
+                          borderBottomWidth: 1,
+                          borderBottomColor: '#f1f5f9'
+                        }}>
+                          <View style={{ gap: 8, marginBottom: 12 }}>
+                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151' }}>
+                              Profile Visibility
+                            </Text>
+                            <Text style={{ fontSize: 14, color: '#64748b' }}>
+                              Control who can see your profile information
+                            </Text>
+                          </View>
+                          <View style={{ gap: 8 }}>
+                            {['public', 'limited', 'private'].map((visibility) => (
+                              <Pressable
+                                key={visibility}
+                                onPress={() => handlePrivacySettingChange('profileVisibility', visibility)}
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 12,
+                                  paddingVertical: 8,
+                                  paddingHorizontal: 12,
+                                  borderRadius: 8,
+                                  backgroundColor: privacySettings.profileVisibility === visibility ? '#f0f4ff' : 'transparent',
+                                  borderWidth: 1,
+                                  borderColor: privacySettings.profileVisibility === visibility ? '#667eea' : '#e2e8f0'
+                                }}
+                              >
+                                <View style={{
+                                  width: 16,
+                                  height: 16,
+                                  borderRadius: 8,
+                                  backgroundColor: privacySettings.profileVisibility === visibility ? '#667eea' : 'transparent',
+                                  borderWidth: 2,
+                                  borderColor: privacySettings.profileVisibility === visibility ? '#667eea' : '#d1d5db'
+                                }} />
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ 
+                                    fontSize: 14, 
+                                    fontWeight: '500', 
+                                    color: privacySettings.profileVisibility === visibility ? '#667eea' : '#374151' 
+                                  }}>
+                                    {visibility === 'public' ? '🌍 Public' : 
+                                     visibility === 'limited' ? '👥 Limited' : '🔒 Private'}
+                                  </Text>
+                                  <Text style={{ fontSize: 12, color: '#64748b' }}>
+                                    {visibility === 'public' ? 'Visible to everyone' : 
+                                     visibility === 'limited' ? 'Visible to registered users only' : 'Only visible to you'}
+                                  </Text>
+                                </View>
+                              </Pressable>
+                            ))}
+                          </View>
+                        </View>
+
+                        {/* Contact Information */}
+                        <View style={{
+                          paddingVertical: 12,
+                          borderBottomWidth: 1,
+                          borderBottomColor: '#f1f5f9'
+                        }}>
+                          <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151', marginBottom: 12 }}>
+                            Contact Information
+                          </Text>
+                          <View style={{ gap: 12 }}>
+                            <View style={{
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 14, fontWeight: '500', color: '#374151' }}>
+                                  Show Email Address
+                                </Text>
+                                <Text style={{ fontSize: 12, color: '#64748b' }}>
+                                  Display your email on your public profile
+                                </Text>
+                              </View>
+                              {renderToggleSwitch(
+                                privacySettings.showEmail,
+                                () => handlePrivacySettingChange('showEmail', !privacySettings.showEmail),
+                                isSavingPrivacy
+                              )}
+                            </View>
+                            <View style={{
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 14, fontWeight: '500', color: '#374151' }}>
+                                  Show GitHub Profile
+                                </Text>
+                                <Text style={{ fontSize: 12, color: '#64748b' }}>
+                                  Display your GitHub username and link
+                                </Text>
+                              </View>
+                              {renderToggleSwitch(
+                                privacySettings.showGithub,
+                                () => handlePrivacySettingChange('showGithub', !privacySettings.showGithub),
+                                isSavingPrivacy
+                              )}
+                            </View>
+                          </View>
+                        </View>
+
+                        {/* Communication Preferences */}
+                        <View style={{
+                          paddingVertical: 12,
+                          borderBottomWidth: 1,
+                          borderBottomColor: '#f1f5f9'
+                        }}>
+                          <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151', marginBottom: 12 }}>
+                            Communication Preferences
+                          </Text>
+                          <View style={{ gap: 12 }}>
+                            <View style={{
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 14, fontWeight: '500', color: '#374151' }}>
+                                  Allow Direct Messages
+                                </Text>
+                                <Text style={{ fontSize: 12, color: '#64748b' }}>
+                                  Let other users send you direct messages
+                                </Text>
+                              </View>
+                              {renderToggleSwitch(
+                                privacySettings.allowDirectMessages,
+                                () => handlePrivacySettingChange('allowDirectMessages', !privacySettings.allowDirectMessages),
+                                isSavingPrivacy
+                              )}
+                            </View>
+                            <View style={{
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 14, fontWeight: '500', color: '#374151' }}>
+                                  Allow Project Invites
+                                </Text>
+                                <Text style={{ fontSize: 12, color: '#64748b' }}>
+                                  Receive invitations to collaborate on projects
+                                </Text>
+                              </View>
+                              {renderToggleSwitch(
+                                privacySettings.allowProjectInvites,
+                                () => handlePrivacySettingChange('allowProjectInvites', !privacySettings.allowProjectInvites),
+                                isSavingPrivacy
+                              )}
+                            </View>
+                          </View>
+                        </View>
+
+                        {/* Data Processing Consent */}
+                        <View style={{ paddingVertical: 12 }}>
+                          <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151', marginBottom: 12 }}>
+                            Data Processing Consent
+                          </Text>
+                          <View style={{ gap: 12 }}>
+                            <View style={{
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 14, fontWeight: '500', color: '#374151' }}>
+                                  Essential Data Processing
+                                </Text>
+                                <Text style={{ fontSize: 12, color: '#64748b' }}>
+                                  Required for core platform functionality
+                                </Text>
+                              </View>
+                              {renderToggleSwitch(
+                                privacySettings.dataProcessingConsent,
+                                () => handlePrivacySettingChange('dataProcessingConsent', !privacySettings.dataProcessingConsent),
+                                isSavingPrivacy
+                              )}
+                            </View>
+                            <View style={{
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 14, fontWeight: '500', color: '#374151' }}>
+                                  Marketing Communications
+                                </Text>
+                                <Text style={{ fontSize: 12, color: '#64748b' }}>
+                                  Receive promotional emails and updates
+                                </Text>
+                              </View>
+                              {renderToggleSwitch(
+                                privacySettings.marketingConsent,
+                                () => handlePrivacySettingChange('marketingConsent', !privacySettings.marketingConsent),
+                                isSavingPrivacy
+                              )}
+                            </View>
+                            <View style={{
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 14, fontWeight: '500', color: '#374151' }}>
+                                  Analytics & Performance
+                                </Text>
+                                <Text style={{ fontSize: 12, color: '#64748b' }}>
+                                  Help us improve the platform with usage data
+                                </Text>
+                              </View>
+                              {renderToggleSwitch(
+                                privacySettings.analyticsConsent,
+                                () => handlePrivacySettingChange('analyticsConsent', !privacySettings.analyticsConsent),
+                                isSavingPrivacy
+                              )}
+                            </View>
+                          </View>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Data Management */}
+                  <View style={{
+                    backgroundColor: '#ffffff',
+                    borderRadius: 16,
+                    padding: 24,
+                    borderWidth: 1,
+                    borderColor: '#e2e8f0',
+                    gap: 20
+                  }}>
+                    <View style={{ gap: 8 }}>
+                      <Text style={{ fontSize: 18, fontWeight: '700', color: '#374151' }}>
+                        📊 Data Management
+                      </Text>
+                      <Text style={{ fontSize: 14, color: '#64748b' }}>
+                        Export, manage, or delete your personal data
+                      </Text>
+                    </View>
+                    
+                    <View style={{ gap: 16 }}>
+                      {/* Data Export */}
                       <View style={{
-                        width: 20,
-                        height: 20,
-                        backgroundColor: '#ffffff',
-                        borderRadius: 10
-                      }} />
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        paddingVertical: 12,
+                        borderBottomWidth: 1,
+                        borderBottomColor: '#f1f5f9'
+                      }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151' }}>
+                            Export Your Data
+                          </Text>
+                          <Text style={{ fontSize: 14, color: '#64748b' }}>
+                            Download all your personal data in JSON format
+                          </Text>
+                        </View>
+                        <Pressable
+                          onPress={handleDataExport}
+                          disabled={isExportingData}
+                          style={{
+                            backgroundColor: isExportingData ? '#94a3b8' : '#667eea',
+                            paddingHorizontal: 16,
+                            paddingVertical: 8,
+                            borderRadius: 8,
+                            opacity: isExportingData ? 0.6 : 1
+                          }}
+                        >
+                          <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 14 }}>
+                            {isExportingData ? 'Exporting...' : 'Export Data'}
+                          </Text>
+                        </Pressable>
+                      </View>
+
+                      {/* Account Deletion */}
+                      {accountDeletionStatus?.status !== 'pending' && (
+                        <View style={{
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          paddingVertical: 12
+                        }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#dc2626' }}>
+                              Delete Account
+                            </Text>
+                            <Text style={{ fontSize: 14, color: '#64748b' }}>
+                              Permanently delete your account and all data (30-day grace period)
+                            </Text>
+                          </View>
+                          <Pressable
+                            onPress={handleAccountDeletion}
+                            style={{
+                              backgroundColor: '#dc2626',
+                              paddingHorizontal: 16,
+                              paddingVertical: 8,
+                              borderRadius: 8
+                            }}
+                          >
+                            <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 14 }}>
+                              Delete Account
+                            </Text>
+                          </Pressable>
+                        </View>
+                      )}
                     </View>
                   </View>
 
+                  {/* Legal Information */}
                   <View style={{
-                    flexDirection: 'row',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    paddingVertical: 12
+                    backgroundColor: '#ffffff',
+                    borderRadius: 16,
+                    padding: 24,
+                    borderWidth: 1,
+                    borderColor: '#e2e8f0',
+                    gap: 20
                   }}>
-                    <View>
-                      <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151' }}>
-                        Profile Visibility
+                    <View style={{ gap: 8 }}>
+                      <Text style={{ fontSize: 18, fontWeight: '700', color: '#374151' }}>
+                        📋 Legal Information
                       </Text>
                       <Text style={{ fontSize: 14, color: '#64748b' }}>
-                        Make your profile visible to others
+                        Review our policies and legal documents
                       </Text>
                     </View>
-                    <View style={{
-                      width: 48,
-                      height: 24,
-                      backgroundColor: '#667eea',
-                      borderRadius: 12,
-                      justifyContent: 'center',
-                      alignItems: 'flex-end',
-                      paddingHorizontal: 2
-                    }}>
-                      <View style={{
-                        width: 20,
-                        height: 20,
-                        backgroundColor: '#ffffff',
-                        borderRadius: 10
-                      }} />
+                    
+                    <View style={{ gap: 12 }}>
+                      {[
+                        { title: 'Privacy Policy', desc: 'How we collect, use, and protect your data', icon: '🔒' },
+                        { title: 'Terms of Service', desc: 'Rules and guidelines for using DevRecruit', icon: '📜' },
+                        { title: 'Cookie Policy', desc: 'Information about cookies and tracking', icon: '🍪' },
+                        { title: 'Data Processing Agreement', desc: 'GDPR compliance and data handling', icon: '⚖️' }
+                      ].map((item, index) => (
+                        <Pressable
+                          key={index}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 12,
+                            paddingVertical: 12,
+                            paddingHorizontal: 16,
+                            borderRadius: 8,
+                            backgroundColor: '#f8fafc',
+                            borderWidth: 1,
+                            borderColor: '#e2e8f0'
+                          }}
+                        >
+                          <Text style={{ fontSize: 20 }}>{item.icon}</Text>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151' }}>
+                              {item.title}
+                            </Text>
+                            <Text style={{ fontSize: 12, color: '#64748b' }}>
+                              {item.desc}
+                            </Text>
+                          </View>
+                          <Text style={{ fontSize: 16, color: '#94a3b8' }}>→</Text>
+                        </Pressable>
+                      ))}
                     </View>
                   </View>
-                </View>
-              </View>
+
+                  {/* Security Information */}
+                  <View style={{
+                    backgroundColor: '#f0f9ff',
+                    borderRadius: 16,
+                    padding: 20,
+                    borderWidth: 1,
+                    borderColor: '#bae6fd',
+                    gap: 12
+                  }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Text style={{ fontSize: 20 }}>🛡️</Text>
+                      <Text style={{ fontSize: 16, fontWeight: '700', color: '#0369a1' }}>
+                        Your Privacy Matters
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 14, color: '#0c4a6e', lineHeight: 20 }}>
+                      We're committed to protecting your privacy and giving you control over your data. 
+                      All settings are saved automatically and take effect immediately. 
+                      You can change these settings at any time.
+                    </Text>
+                  </View>
+                </>
+              )}
             </View>
-          </View>
+          </ScrollView>
         )
 
       case 'help':
