@@ -232,19 +232,19 @@ export function HomeScreen() {
                 borderRadius: 4,
                 backgroundColor: '#22c55e'
               }} />
-              <Text style={{
+            <Text style={{
                 color: '#22c55e',
                 fontSize: 13,
                 fontWeight: '700',
                 letterSpacing: 0.3
               }}>
                 Live Beta • 2,400+ Developers
-              </Text>
+            </Text>
             </Pressable>
-
+            
             {/* Main Headline */}
             <View style={{ gap: 16 }}>
-              <Text style={{
+            <Text style={{
                 fontSize: 48,
                 fontWeight: '900',
                 color: '#0f172a',
@@ -265,8 +265,8 @@ export function HomeScreen() {
                 }}>
                   Create.
                 </Text>
-              </Text>
-              
+            </Text>
+
               <Text style={{
                 fontSize: 18,
                 color: '#64748b',
@@ -284,7 +284,7 @@ export function HomeScreen() {
               gap: 16,
               alignItems: 'center'
             }}>
-              <Pressable
+              <Pressable 
                 onHoverIn={() => setHoveredButton('primary-cta')}
                 onHoverOut={() => setHoveredButton(null)}
                 style={{
@@ -315,8 +315,8 @@ export function HomeScreen() {
                   Start Collaborating
                 </TextLink>
               </Pressable>
-
-              <Pressable
+              
+              <Pressable 
                 onHoverIn={() => setHoveredButton('secondary-cta')}
                 onHoverOut={() => setHoveredButton(null)}
                 style={{
@@ -354,13 +354,13 @@ export function HomeScreen() {
             </View>
 
             {/* Popular Services Tag */}
-            <Pressable
+                  <Pressable
               onHoverIn={() => setHoveredButton('popular-tag')}
               onHoverOut={() => setHoveredButton(null)}
-              style={{
+                    style={{
                 alignSelf: 'flex-start',
                 backgroundColor: hoveredButton === 'popular-tag' ? 'rgba(102, 126, 234, 0.12)' : 'rgba(102, 126, 234, 0.08)',
-                borderWidth: 1,
+                      borderWidth: 1,
                 borderColor: hoveredButton === 'popular-tag' ? 'rgba(102, 126, 234, 0.3)' : 'rgba(102, 126, 234, 0.15)',
                 borderRadius: 18,
                 paddingHorizontal: 14,
@@ -379,8 +379,8 @@ export function HomeScreen() {
                 transition: 'color 0.2s ease-in-out'
               }}>
                 🔥 Popular: {popularServices.slice(0, 4).join(' • ')}
-              </Text>
-            </Pressable>
+                    </Text>
+                  </Pressable>
           </View>
 
           {/* Right Side - Compact Live Projects */}
@@ -391,14 +391,14 @@ export function HomeScreen() {
                 alignItems: 'center', 
                 gap: 8 
               }}>
-                <Text style={{
-                  fontSize: 24,
+            <Text style={{
+              fontSize: 24,
                   fontWeight: '800',
                   color: '#0f172a',
                   letterSpacing: -0.6
                 }}>
                   Live Projects
-                </Text>
+            </Text>
                 {/* Pulsing Dot */}
                 <View style={{
                   width: 6,
@@ -453,24 +453,24 @@ export function HomeScreen() {
                   }}
                 >
                   <View style={{ gap: 8 }}>
-                    <Text style={{
+                  <Text style={{
                       fontSize: 16,
-                      fontWeight: '700',
+                    fontWeight: '700',
                       color: hoveredCard === index ? '#667eea' : '#0f172a',
                       lineHeight: 20,
                       // @ts-ignore - React Native Web transition
                       transition: 'color 0.2s ease-in-out'
-                    }}>
-                      {job.title}
-                    </Text>
-                    
-                    <Text style={{
+                  }}>
+                    {job.title}
+                  </Text>
+                  
+                  <Text style={{
                       fontSize: 13,
                       color: '#64748b',
                       lineHeight: 18
-                    }}>
-                      {job.description}
-                    </Text>
+                  }}>
+                    {job.description}
+                  </Text>
                   </View>
                   
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
@@ -650,11 +650,7 @@ export function HomeScreen() {
                     // @ts-ignore - React Native Web scroll properties
                     scrollbarWidth: 'none',
                     // @ts-ignore - React Native Web scroll properties
-                    msOverflowStyle: 'none',
-                    // @ts-ignore - React Native Web scroll properties
-                    '&::-webkit-scrollbar': {
-                      display: 'none'
-                    }
+                    msOverflowStyle: 'none'
                   }}
                 >
                   {[
@@ -1047,7 +1043,7 @@ export function HomeScreen() {
               paddingHorizontal: 12,
               paddingVertical: 4
             }}>
-              <Text style={{
+          <Text style={{
                 color: '#667eea',
                 fontSize: 11,
                 fontWeight: '700',
@@ -1062,7 +1058,7 @@ export function HomeScreen() {
               fontSize: 32,
               fontWeight: '800',
               color: '#0f172a',
-              textAlign: 'center',
+            textAlign: 'center',
               letterSpacing: -0.8,
               lineHeight: 38
             }}>
@@ -1079,7 +1075,7 @@ export function HomeScreen() {
               }}>
                 Collaborate.
               </Text>
-            </Text>
+          </Text>
 
             <Text style={{
               fontSize: 16,
@@ -1148,24 +1144,24 @@ export function HomeScreen() {
                   flexDirection: 'row',
                   justifyContent: 'space-between',
                   alignItems: 'center'
-                }}>
-                  <View style={{
+              }}>
+                <View style={{
                     backgroundColor: item.color,
                     width: 32,
                     height: 32,
                     borderRadius: 6,
-                    justifyContent: 'center',
-                    alignItems: 'center'
-                  }}>
-                    <Text style={{
+                  justifyContent: 'center',
+                  alignItems: 'center'
+                }}>
+                  <Text style={{
                       color: '#ffffff',
                       fontSize: 12,
                       fontWeight: '800',
                       letterSpacing: -0.2
-                    }}>
-                      {item.step}
-                    </Text>
-                  </View>
+                  }}>
+                    {item.step}
+                  </Text>
+                </View>
 
                   <View style={{
                     width: 40,
@@ -1185,24 +1181,24 @@ export function HomeScreen() {
 
                 {/* Content */}
                 <View style={{ gap: 8, flex: 1 }}>
-                  <Text style={{
+                <Text style={{
                     fontSize: 18,
                     fontWeight: '700',
                     color: '#0f172a',
                     letterSpacing: -0.2
-                  }}>
-                    {item.title}
-                  </Text>
+                }}>
+                  {item.title}
+                </Text>
 
-                  <Text style={{
+                <Text style={{
                     fontSize: 14,
                     color: '#64748b',
                     lineHeight: 20,
                     fontWeight: '500'
-                  }}>
-                    {item.description}
-                  </Text>
-                </View>
+                }}>
+                  {item.description}
+                </Text>
+              </View>
 
                 {/* Simple Arrow */}
                 <View style={{
@@ -1302,12 +1298,12 @@ export function HomeScreen() {
             maxWidth: 800
           }}>
             Developer collaboration at your{' '}
-            <Text style={{
+          <Text style={{
               color: '#667eea',
               fontWeight: '800'
             }}>
               fingertips
-            </Text>
+          </Text>
           </Text>
 
           <Pressable 
@@ -1373,7 +1369,7 @@ export function HomeScreen() {
               }}>
                 2,400+ Active Developers
               </Text>
-            </View>
+        </View>
 
             <View style={{
               flexDirection: 'row',
@@ -1393,7 +1389,7 @@ export function HomeScreen() {
               }}>
                 500+ Projects Completed
               </Text>
-            </View>
+      </View>
 
             <View style={{
               flexDirection: 'row',
@@ -1440,7 +1436,7 @@ export function HomeScreen() {
           }}>
             {/* Popular Services Column */}
             <View style={{ minWidth: 200, flex: 1 }}>
-              <Text style={{
+          <Text style={{
                 fontSize: 16,
                 fontWeight: '700',
                 color: '#0f172a',
@@ -1448,7 +1444,7 @@ export function HomeScreen() {
                 letterSpacing: -0.2
               }}>
                 Popular Services
-              </Text>
+          </Text>
               <View style={{ gap: 12 }}>
                 {[
                   'Website Development',
@@ -1482,7 +1478,7 @@ export function HomeScreen() {
 
             {/* Programming Languages Column */}
             <View style={{ minWidth: 200, flex: 1 }}>
-              <Text style={{
+          <Text style={{
                 fontSize: 16,
                 fontWeight: '700',
                 color: '#0f172a',
@@ -1508,7 +1504,7 @@ export function HomeScreen() {
                     onHoverOut={() => setHoveredButton(null)}
                   >
                     <TextLink href={`/developers/${language.toLowerCase()}`} style={{
-                      fontSize: 14,
+            fontSize: 14,
                       color: hoveredButton === `footer-lang-${index}` ? '#667eea' : '#64748b',
                       fontWeight: '500',
                       textDecorationLine: 'none',
@@ -1532,7 +1528,7 @@ export function HomeScreen() {
                 letterSpacing: -0.2
               }}>
                 For Developers
-              </Text>
+          </Text>
               <View style={{ gap: 12 }}>
                 {[
                   'How DevRecruit Works',
@@ -1717,8 +1713,8 @@ export function HomeScreen() {
               ))}
             </View>
           </View>
-        </View>
       </View>
+    </View>
     </ScrollView>
   )
 }

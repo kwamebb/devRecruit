@@ -30,5 +30,8 @@
     "useTabs": false,
     "tabWidth": 2,
     "singleQuote": true
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.50.0"
   }
 }

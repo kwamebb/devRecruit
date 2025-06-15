@@ -59,3 +59,13 @@ body {
     transform: scale(1.1);
   }
 }
+
+/* Hide scrollbars for language scroll container */
+#language-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+#language-scroll {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
