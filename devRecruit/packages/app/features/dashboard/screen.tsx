@@ -49,6 +49,16 @@ export function DashboardScreen() {
   const [isEditingProfile, setIsEditingProfile] = useState(false)
   const [editedProfile, setEditedProfile] = useState<any>(null)
   const [isSavingProfile, setIsSavingProfile] = useState(false)
+  const [isSigningOut, setIsSigningOut] = useState(false)
+
+  // Authentication guard - redirect if not authenticated
+  useEffect(() => {
+    if (!loading && !user) {
+      console.log('🔒 User not authenticated, redirecting to home...')
+      router.push('/')
+      return
+    }
+  }, [user, loading, router])
 
   // Check if user has completed onboarding
   useEffect(() => {
@@ -88,8 +98,8 @@ export function DashboardScreen() {
     checkOnboardingStatus()
   }, [user, router])
 
-  // Show loading while checking onboarding status
-  if (checkingOnboarding) {
+  // Show loading while auth is loading or checking onboarding status
+  if (loading || checkingOnboarding) {
     return (
       <View style={{
         flex: 1,
@@ -108,11 +118,21 @@ export function DashboardScreen() {
     )
   }
 
+  // If not authenticated, don't render anything (redirect will happen)
+  if (!user) {
+    return null
+  }
+
   const handleSignOut = async () => {
+    setIsSigningOut(true)
     try {
+      console.log('🚪 Signing out user...')
       await signOut()
+      console.log('✅ Sign out successful, redirecting to home...')
+      router.push('/')
     } catch (error) {
-      console.error('Sign out error:', error)
+      console.error('❌ Sign out error:', error)
+      setIsSigningOut(false)
     }
   }
 
@@ -954,7 +974,7 @@ export function DashboardScreen() {
         <View style={{ marginTop: 'auto' }}>
           <Pressable
             onPress={handleSignOut}
-            disabled={loading}
+            disabled={isSigningOut}
             onHoverIn={() => setHoveredButton('signout')}
             onHoverOut={() => setHoveredButton(null)}
             style={{
@@ -966,7 +986,8 @@ export function DashboardScreen() {
               borderRadius: 8,
               backgroundColor: hoveredButton === 'signout' ? '#fef2f2' : 'transparent',
               borderWidth: 1,
-              borderColor: hoveredButton === 'signout' ? '#fecaca' : '#e2e8f0'
+              borderColor: hoveredButton === 'signout' ? '#fecaca' : '#e2e8f0',
+              opacity: isSigningOut ? 0.6 : 1
             }}
           >
             <Text style={{ fontSize: 18 }}>🚪</Text>
@@ -975,7 +996,7 @@ export function DashboardScreen() {
               fontWeight: '500',
               color: hoveredButton === 'signout' ? '#dc2626' : '#64748b'
             }}>
-              {loading ? 'Signing out...' : 'Sign Out'}
+              {isSigningOut ? 'Signing out...' : 'Sign Out'}
             </Text>
           </Pressable>
         </View>
