@@ -5,6 +5,16 @@ import { View, Text, Pressable, TextInput, ScrollView, Alert } from 'react-nativ
 import { useAuth } from '../../provider/auth'
 import { supabase } from '../../lib/supabase'
 import { useAppRouter } from '../../hooks/useAppRouter'
+import {
+  validateFullName,
+  validateUsername,
+  validateAge,
+  validateEducationStatus,
+  validateCodingLanguages,
+  formatFullName,
+  formatUsername,
+  getCharacterCountInfo
+} from '../../utils/profileValidation'
 
 interface OnboardingData {
   username: string
@@ -42,13 +52,57 @@ export function OnboardingScreen() {
     codingLanguages: []
   })
 
+  // Validation state for real-time feedback
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
+
+  // Real-time field validation
+  const validateField = (fieldName: string, value: any) => {
+    let validation
+    
+    switch (fieldName) {
+      case 'fullName':
+        validation = validateFullName(value || '')
+        break
+      case 'username':
+        validation = validateUsername(value || '')
+        break
+      case 'age':
+        validation = validateAge(value || '')
+        break
+      case 'educationStatus':
+        validation = validateEducationStatus(value || '')
+        break
+      case 'codingLanguages':
+        // For onboarding, be more lenient - just check minimum requirement
+        const languages = value || []
+        if (languages.length === 0) {
+          validation = { isValid: false, error: "Please select at least one coding language" }
+        } else {
+          validation = { isValid: true }
+        }
+        break
+      default:
+        return
+    }
+    
+    setValidationErrors(prev => ({
+      ...prev,
+      [fieldName]: validation.isValid ? '' : validation.error || ''
+    }))
+  }
+
   const handleLanguageToggle = (language: string) => {
+    const newLanguages = formData.codingLanguages.includes(language)
+      ? formData.codingLanguages.filter(lang => lang !== language)
+      : [...formData.codingLanguages, language]
+      
     setFormData(prev => ({
       ...prev,
-      codingLanguages: prev.codingLanguages.includes(language)
-        ? prev.codingLanguages.filter(lang => lang !== language)
-        : [...prev.codingLanguages, language]
+      codingLanguages: newLanguages
     }))
+    
+    // Validate after selection
+    validateField('codingLanguages', newLanguages)
   }
 
   const handleNext = () => {
@@ -64,48 +118,139 @@ export function OnboardingScreen() {
   }
 
   const handleSubmit = async () => {
+    console.log('🚀 Starting handleSubmit...')
+    
     if (!user) {
+      console.error('❌ No user found')
       Alert.alert('Error', 'User not found. Please try logging in again.')
       return
     }
 
-    if (!formData.username || !formData.fullName || !formData.age || !formData.educationStatus) {
-      Alert.alert('Error', 'Please fill in all required fields.')
+    console.log('✅ User found:', user.id)
+
+    // Comprehensive validation using our validation utility
+    const fullNameValid = validateFullName(formData.fullName || '')
+    const usernameValid = validateUsername(formData.username || '')
+    const ageValid = validateAge(formData.age || '')
+    const educationValid = validateEducationStatus(formData.educationStatus || '')
+    
+    // For onboarding, be more lenient with languages - just check minimum
+    const hasLanguages = formData.codingLanguages && formData.codingLanguages.length > 0
+    
+    console.log('🔍 Validation results:', {
+      fullNameValid: fullNameValid.isValid,
+      usernameValid: usernameValid.isValid,
+      ageValid: ageValid.isValid,
+      educationValid: educationValid.isValid,
+      hasLanguages
+    })
+    
+    // Collect all validation errors
+    const errors = []
+    if (!fullNameValid.isValid) errors.push(`Full Name: ${fullNameValid.error}`)
+    if (!usernameValid.isValid) errors.push(`Username: ${usernameValid.error}`)
+    if (!ageValid.isValid) errors.push(`Age: ${ageValid.error}`)
+    if (!educationValid.isValid) errors.push(`Education: ${educationValid.error}`)
+    if (!hasLanguages) errors.push(`Languages: Please select at least one coding language`)
+    
+    if (errors.length > 0) {
+      console.error('❌ Profile validation failed:', errors)
+      Alert.alert(
+        'Profile Validation Failed',
+        errors.join('\n\n'),
+        [{ text: 'OK', style: 'default' }]
+      )
       return
     }
 
-    if (formData.codingLanguages.length === 0) {
-      Alert.alert('Error', 'Please select at least one coding language.')
-      return
-    }
-
+    console.log('✅ All validation passed, starting database update...')
     setIsLoading(true)
 
     try {
+      // Format data before saving
+      const formattedData = {
+        username: formatUsername(formData.username || ''),
+        full_name: formatFullName(formData.fullName || ''),
+        age: parseInt(formData.age || '0'),
+        education_status: formData.educationStatus,
+        coding_languages: formData.codingLanguages.slice(0, 15), // Limit to 15 for database
+        onboarding_completed: true,
+        updated_at: new Date().toISOString()
+      }
+
+      console.log('📝 Formatted data for database:', formattedData)
+
       const { error } = await supabase
         .from('profiles')
-        .update({
-          username: formData.username,
-          full_name: formData.fullName,
-          age: parseInt(formData.age),
-          education_status: formData.educationStatus,
-          coding_languages: formData.codingLanguages,
-          onboarding_completed: true,
-          updated_at: new Date().toISOString()
-        })
+        .update(formattedData)
         .eq('id', user.id)
 
       if (error) {
-        console.error('Onboarding update error:', error)
-        Alert.alert('Error', 'Failed to save your information. Please try again.')
+        console.error('❌ Onboarding update error:', error)
+        Alert.alert(
+          'Update Failed',
+          error.message || 'Failed to save your information. Please try again.',
+          [{ text: 'OK', style: 'default' }]
+        )
         return
       }
 
+      console.log('✅ Database update successful!')
+
+      // Fetch GitHub stats if user has GitHub username
+      if (user.user_metadata?.user_name || user.user_metadata?.login) {
+        console.log('🔄 Fetching initial GitHub stats...')
+        try {
+          const { updateUserGitHubStats } = await import('../../utils/githubStats')
+          const githubUsername = user.user_metadata?.user_name || user.user_metadata?.login
+          
+          const statsResult = await updateUserGitHubStats(user.id, githubUsername)
+          if (statsResult.success) {
+            console.log('✅ GitHub stats fetched successfully:', statsResult.stats)
+          } else {
+            console.log('⚠️ GitHub stats fetch failed:', statsResult.error)
+          }
+        } catch (error) {
+          console.log('⚠️ GitHub stats fetch error:', error)
+        }
+      }
+
+      // Clear validation errors
+      setValidationErrors({})
+      
+      // Check if we had to trim languages
+      const languageMessage = formData.codingLanguages.length > 15 
+        ? `Your profile has been set up successfully! We've saved your top 15 programming languages - you can update this anytime in your dashboard.`
+        : 'Your profile has been set up successfully. Let\'s get started!'
+      
+      console.log('🎉 Showing success alert...')
+      Alert.alert(
+        'Welcome to DevRecruit! 🎉',
+        languageMessage,
+        [{ 
+          text: 'Let\'s Go!', 
+          style: 'default',
+          onPress: () => {
+            console.log('🚀 Navigating to dashboard...')
+            router.push('/dashboard')
+          }
+        }]
+      )
+      
+      // Navigate automatically after a very short delay
+      setTimeout(() => {
+        console.log('🔄 Auto-navigating to dashboard...')
+        router.push('/dashboard')
+      }, 500)
+      
       console.log('✅ Onboarding completed successfully!')
-      router.push('/dashboard')
     } catch (error) {
       console.error('Unexpected error:', error)
-      Alert.alert('Error', 'An unexpected error occurred. Please try again.')
+      Alert.alert(
+        'Error',
+        'An unexpected error occurred. Please try again.',
+        [{ text: 'OK', style: 'default' }]
+      )
     } finally {
       setIsLoading(false)
     }
@@ -114,13 +259,19 @@ export function OnboardingScreen() {
   const isStepValid = () => {
     switch (currentStep) {
       case 1:
-        return formData.username.length >= 3 && formData.fullName.length >= 2
+        const fullNameValid = validateFullName(formData.fullName || '')
+        const usernameValid = validateUsername(formData.username || '')
+        return fullNameValid.isValid && usernameValid.isValid
       case 2:
-        return formData.age && parseInt(formData.age) >= 13 && parseInt(formData.age) <= 100
+        const ageValid = validateAge(formData.age || '')
+        return ageValid.isValid
       case 3:
-        return formData.educationStatus !== ''
+        const educationValid = validateEducationStatus(formData.educationStatus || '')
+        return educationValid.isValid
       case 4:
-        return formData.codingLanguages.length > 0
+        // For onboarding, just check if at least 1 language is selected
+        // We'll allow more than 15 for now and fix it later in dashboard
+        return formData.codingLanguages && formData.codingLanguages.length > 0
       default:
         return false
     }
@@ -142,27 +293,66 @@ export function OnboardingScreen() {
 
             <View style={{ gap: 20 }}>
               <View style={{ gap: 8 }}>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151' }}>
-                  Username *
-                </Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151' }}>
+                    Username *
+                  </Text>
+                  <Text style={{
+                    fontSize: 12,
+                    color: (() => {
+                      const len = formData.username?.length || 0
+                      if (len > 22) return '#ef4444'
+                      if (len >= 18) return '#f59e0b'
+                      return '#64748b'
+                    })()
+                  }}>
+                    {formData.username?.length || 0}/22
+                  </Text>
+                </View>
                 <TextInput
                   style={{
                     borderWidth: 2,
-                    borderColor: formData.username ? '#667eea' : '#e2e8f0',
+                    borderColor: (() => {
+                      if (validationErrors.username) return '#ef4444'
+                      if (formData.username && validateUsername(formData.username).isValid) return '#10b981'
+                      return '#e2e8f0'
+                    })(),
                     borderRadius: 12,
                     paddingHorizontal: 16,
                     paddingVertical: 14,
                     fontSize: 16,
                     backgroundColor: '#ffffff'
                   }}
-                  placeholder="Choose a unique username"
+                  placeholder="Choose a unique username (3-22 characters)"
                   value={formData.username}
-                  onChangeText={(text) => setFormData(prev => ({ ...prev, username: text.toLowerCase().replace(/[^a-z0-9_]/g, '') }))}
-                  maxLength={20}
+                  onChangeText={(text) => {
+                    const formatted = formatUsername(text)
+                    setFormData(prev => ({ ...prev, username: formatted }))
+                    validateField('username', formatted)
+                  }}
+                  maxLength={22}
                 />
-                <Text style={{ fontSize: 12, color: '#64748b' }}>
-                  This will be your public username on DevRecruit
-                </Text>
+                {validationErrors.username ? (
+                  <Text style={{
+                    fontSize: 12,
+                    color: '#ef4444',
+                    fontWeight: '500'
+                  }}>
+                    {validationErrors.username}
+                  </Text>
+                ) : formData.username && validateUsername(formData.username).isValid ? (
+                  <Text style={{
+                    fontSize: 12,
+                    color: '#10b981',
+                    fontWeight: '500'
+                  }}>
+                    ✓ Username looks great!
+                  </Text>
+                ) : (
+                  <Text style={{ fontSize: 12, color: '#64748b' }}>
+                    This will be your public username on DevRecruit
+                  </Text>
+                )}
               </View>
 
               <View style={{ gap: 8 }}>
@@ -172,18 +362,46 @@ export function OnboardingScreen() {
                 <TextInput
                   style={{
                     borderWidth: 2,
-                    borderColor: formData.fullName ? '#667eea' : '#e2e8f0',
+                    borderColor: (() => {
+                      if (validationErrors.fullName) return '#ef4444'
+                      if (formData.fullName && validateFullName(formData.fullName).isValid) return '#10b981'
+                      return '#e2e8f0'
+                    })(),
                     borderRadius: 12,
                     paddingHorizontal: 16,
                     paddingVertical: 14,
                     fontSize: 16,
                     backgroundColor: '#ffffff'
                   }}
-                  placeholder="Enter your full name"
+                  placeholder="Enter your first and last name"
                   value={formData.fullName}
-                  onChangeText={(text) => setFormData(prev => ({ ...prev, fullName: text }))}
+                  onChangeText={(text) => {
+                    setFormData(prev => ({ ...prev, fullName: text }))
+                    validateField('fullName', text)
+                  }}
                   maxLength={50}
                 />
+                {validationErrors.fullName ? (
+                  <Text style={{
+                    fontSize: 12,
+                    color: '#ef4444',
+                    fontWeight: '500'
+                  }}>
+                    {validationErrors.fullName}
+                  </Text>
+                ) : formData.fullName && validateFullName(formData.fullName).isValid ? (
+                  <Text style={{
+                    fontSize: 12,
+                    color: '#10b981',
+                    fontWeight: '500'
+                  }}>
+                    ✓ Name looks perfect!
+                  </Text>
+                ) : (
+                  <Text style={{ fontSize: 12, color: '#64748b' }}>
+                    Please enter your first and last name
+                  </Text>
+                )}
               </View>
             </View>
           </View>
@@ -208,22 +426,48 @@ export function OnboardingScreen() {
               <TextInput
                 style={{
                   borderWidth: 2,
-                  borderColor: formData.age ? '#667eea' : '#e2e8f0',
+                  borderColor: (() => {
+                    if (validationErrors.age) return '#ef4444'
+                    if (formData.age && validateAge(formData.age).isValid) return '#10b981'
+                    return '#e2e8f0'
+                  })(),
                   borderRadius: 12,
                   paddingHorizontal: 16,
                   paddingVertical: 14,
                   fontSize: 16,
                   backgroundColor: '#ffffff'
                 }}
-                placeholder="Enter your age"
+                placeholder="Enter your age (13+)"
                 value={formData.age}
-                onChangeText={(text) => setFormData(prev => ({ ...prev, age: text.replace(/[^0-9]/g, '') }))}
+                onChangeText={(text) => {
+                  const numericText = text.replace(/[^0-9]/g, '')
+                  setFormData(prev => ({ ...prev, age: numericText }))
+                  validateField('age', numericText)
+                }}
                 keyboardType="numeric"
                 maxLength={3}
               />
-              <Text style={{ fontSize: 12, color: '#64748b' }}>
-                Must be 13 or older to use DevRecruit
-              </Text>
+              {validationErrors.age ? (
+                <Text style={{
+                  fontSize: 12,
+                  color: '#ef4444',
+                  fontWeight: '500'
+                }}>
+                  {validationErrors.age}
+                </Text>
+              ) : formData.age && validateAge(formData.age).isValid ? (
+                <Text style={{
+                  fontSize: 12,
+                  color: '#10b981',
+                  fontWeight: '500'
+                }}>
+                  ✓ Age verified
+                </Text>
+              ) : (
+                <Text style={{ fontSize: 12, color: '#64748b' }}>
+                  Must be 13 or older to use DevRecruit
+                </Text>
+              )}
             </View>
           </View>
         )
@@ -244,7 +488,10 @@ export function OnboardingScreen() {
               {EDUCATION_OPTIONS.map((option) => (
                 <Pressable
                   key={option.value}
-                  onPress={() => setFormData(prev => ({ ...prev, educationStatus: option.value as any }))}
+                  onPress={() => {
+                    setFormData(prev => ({ ...prev, educationStatus: option.value as any }))
+                    validateField('educationStatus', option.value)
+                  }}
                   style={{
                     borderWidth: 2,
                     borderColor: formData.educationStatus === option.value ? '#667eea' : '#e2e8f0',
@@ -284,7 +531,7 @@ export function OnboardingScreen() {
                     </Text>
                   </View>
 
-                  {formData.educationStatus === option.value && (
+                  {formData.educationStatus === option.value ? (
                     <View style={{
                       width: 24,
                       height: 24,
@@ -295,9 +542,21 @@ export function OnboardingScreen() {
                     }}>
                       <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: 'bold' }}>✓</Text>
                     </View>
-                  )}
+                  ) : null}
                 </Pressable>
               ))}
+              
+              {validationErrors.educationStatus ? (
+                <Text style={{
+                  fontSize: 12,
+                  color: '#ef4444',
+                  fontWeight: '500',
+                  textAlign: 'center',
+                  marginTop: 8
+                }}>
+                  {validationErrors.educationStatus}
+                </Text>
+              ) : null}
             </View>
           </View>
         )
@@ -344,22 +603,56 @@ export function OnboardingScreen() {
               ))}
             </View>
 
-            {formData.codingLanguages.length > 0 && (
+            {validationErrors.codingLanguages ? (
+              <Text style={{
+                fontSize: 12,
+                color: '#ef4444',
+                fontWeight: '500',
+                textAlign: 'center',
+                marginTop: 8
+              }}>
+                {validationErrors.codingLanguages}
+              </Text>
+            ) : null}
+
+            {formData.codingLanguages.length > 0 ? (
               <View style={{
-                backgroundColor: '#f8fafc',
+                backgroundColor: formData.codingLanguages.length > 15 ? '#fef2f2' : '#f8fafc',
                 borderRadius: 12,
                 padding: 16,
                 borderWidth: 1,
-                borderColor: '#e2e8f0'
+                borderColor: formData.codingLanguages.length > 15 ? '#fecaca' : '#e2e8f0'
               }}>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 8 }}>
-                  Selected ({formData.codingLanguages.length}):
+                <Text style={{ 
+                  fontSize: 14, 
+                  fontWeight: '600', 
+                  color: formData.codingLanguages.length > 15 ? '#dc2626' : '#374151', 
+                  marginBottom: 8 
+                }}>
+                  Selected ({formData.codingLanguages.length}/15):
                 </Text>
-                <Text style={{ fontSize: 14, color: '#64748b' }}>
+                <Text style={{ fontSize: 14, color: '#64748b', marginBottom: 8 }}>
                   {formData.codingLanguages.join(', ')}
                 </Text>
+                {formData.codingLanguages.length > 15 ? (
+                  <Text style={{
+                    fontSize: 12,
+                    color: '#dc2626',
+                    fontWeight: '500'
+                  }}>
+                    Please select no more than 15 languages to keep your profile focused
+                  </Text>
+                ) : formData.codingLanguages.length >= 1 ? (
+                  <Text style={{
+                    fontSize: 12,
+                    color: '#10b981',
+                    fontWeight: '500'
+                  }}>
+                    ✓ Great selection!
+                  </Text>
+                ) : null}
               </View>
-            )}
+            ) : null}
           </View>
         )
 
@@ -447,7 +740,30 @@ export function OnboardingScreen() {
                     Back
                   </Text>
                 </Pressable>
-              ) : <View style={{ flex: 1 }} />}
+              ) : (
+                <Pressable
+                  onPress={() => router.push('/')}
+                  onHoverIn={() => setHoveredButton('home')}
+                  onHoverOut={() => setHoveredButton(null)}
+                  style={{
+                    flex: 1,
+                    backgroundColor: hoveredButton === 'home' ? '#f8fafc' : '#ffffff',
+                    borderWidth: 2,
+                    borderColor: '#e2e8f0',
+                    borderRadius: 12,
+                    paddingVertical: 14,
+                    alignItems: 'center'
+                  }}
+                >
+                  <Text style={{
+                    fontSize: 16,
+                    fontWeight: '600',
+                    color: '#64748b'
+                  }}>
+                    Home
+                  </Text>
+                </Pressable>
+              )}
 
               <Pressable
                 onPress={currentStep === 4 ? handleSubmit : handleNext}

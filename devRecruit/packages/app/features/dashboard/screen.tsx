@@ -26,6 +26,18 @@ import {
   getCachedGitHubStats,
   GitHubStats 
 } from '../../utils/githubStats'
+import {
+  validateFullName,
+  validateUsername,
+  validateAge,
+  validateAboutMe,
+  validateEducationStatus,
+  validateCodingLanguages,
+  formatFullName,
+  formatUsername,
+  getCharacterCountInfo,
+  getFieldValidationState
+} from '../../utils/profileValidation'
 
 type TabType = 'profile' | 'settings' | 'my-projects' | 'create-project' | 'browse-projects' | 'help'
 
@@ -93,6 +105,9 @@ export function DashboardScreen() {
   const [isLoadingGithubStats, setIsLoadingGithubStats] = useState(false)
   
   // About Me is now part of the main profile editing
+  
+  // Validation state for real-time feedback
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
 
   // Authentication guard - redirect if not authenticated
   useEffect(() => {
@@ -197,6 +212,24 @@ export function DashboardScreen() {
           }
 
           console.log('✅ Created new profile:', newProfile)
+          
+          // Fetch initial GitHub stats if available
+          if (user.user_metadata?.user_name || user.user_metadata?.login) {
+            console.log('🔄 Fetching initial GitHub stats for new user...')
+            try {
+              const { updateUserGitHubStats } = await import('../../utils/githubStats')
+              const githubUsername = user.user_metadata?.user_name || user.user_metadata?.login
+              
+              const statsResult = await updateUserGitHubStats(user.id, githubUsername)
+              if (statsResult.success) {
+                console.log('✅ Initial GitHub stats fetched successfully:', statsResult.stats)
+              } else {
+                console.log('⚠️ Initial GitHub stats fetch failed:', statsResult.error)
+              }
+            } catch (error) {
+              console.log('⚠️ Initial GitHub stats fetch error:', error)
+            }
+          }
           
           // Redirect to onboarding since it's a new profile
           logInfo('New user redirected to complete onboarding', {
@@ -369,55 +402,85 @@ export function DashboardScreen() {
   const handleSaveProfile = async () => {
     if (!user || !editedProfile) return
 
-    // Validate age
-    const age = parseInt(editedProfile.age)
-    if (!age || age < 13) {
-      console.error('Age must be 13 or above')
-      // You could add a toast notification here
-      return
-    }
-
-    // Validate required fields
-    if (!editedProfile.username || !editedProfile.full_name || !editedProfile.education_status) {
-      console.error('Please fill in all required fields')
-      return
-    }
-
-    if (!editedProfile.coding_languages || editedProfile.coding_languages.length === 0) {
-      console.error('Please select at least one coding language')
+    // Comprehensive validation using our validation utility
+    const fullNameValid = validateFullName(editedProfile.full_name || '')
+    const usernameValid = validateUsername(editedProfile.username || '')
+    const ageValid = validateAge(editedProfile.age || '')
+    const aboutMeValid = validateAboutMe(editedProfile.about_me || '')
+    const educationValid = validateEducationStatus(editedProfile.education_status || '')
+    const languagesValid = validateCodingLanguages(editedProfile.coding_languages || [])
+    
+    // Collect all validation errors
+    const errors = []
+    if (!fullNameValid.isValid) errors.push(`Full Name: ${fullNameValid.error}`)
+    if (!usernameValid.isValid) errors.push(`Username: ${usernameValid.error}`)
+    if (!ageValid.isValid) errors.push(`Age: ${ageValid.error}`)
+    if (!aboutMeValid.isValid) errors.push(`About Me: ${aboutMeValid.error}`)
+    if (!educationValid.isValid) errors.push(`Education: ${educationValid.error}`)
+    if (!languagesValid.isValid) errors.push(`Languages: ${languagesValid.error}`)
+    
+    if (errors.length > 0) {
+      console.error('Profile validation failed:', errors)
+      Alert.alert(
+        'Profile Validation Failed',
+        errors.join('\n\n'),
+        [{ text: 'OK', style: 'default' }]
+      )
       return
     }
 
     setIsSavingProfile(true)
 
     try {
+      // Format data before saving
+      const formattedProfile = {
+        username: formatUsername(editedProfile.username || ''),
+        full_name: formatFullName(editedProfile.full_name || ''),
+        about_me: editedProfile.about_me?.trim() || null,
+        age: parseInt(editedProfile.age || '0'),
+        education_status: editedProfile.education_status,
+        coding_languages: editedProfile.coding_languages,
+        avatar_url: editedProfile.avatar_url,
+        updated_at: new Date().toISOString()
+      }
+
       const { error } = await supabase
         .from('profiles')
-        .update({
-          username: editedProfile.username,
-          full_name: editedProfile.full_name,
-          about_me: editedProfile.about_me,
-          age: age,
-          education_status: editedProfile.education_status,
-          coding_languages: editedProfile.coding_languages,
-          avatar_url: editedProfile.avatar_url,
-          updated_at: new Date().toISOString()
-        })
+        .update(formattedProfile)
         .eq('id', user.id)
 
       if (error) {
         console.error('Profile update error:', error)
-        // You could add a toast notification here
+        Alert.alert(
+          'Update Failed',
+          error.message || 'Failed to update profile',
+          [{ text: 'OK', style: 'default' }]
+        )
         return
       }
 
-      // Update local state
-      setUserProfile(editedProfile)
+      // Update local state with formatted data
+      setUserProfile({ ...editedProfile, ...formattedProfile })
       setIsEditingProfile(false)
       setEditedProfile(null)
+      
+      // Clear validation errors
+      setValidationErrors({})
+      
+      Alert.alert(
+        'Success!',
+        'Your profile has been updated successfully.',
+        [{ text: 'Great!', style: 'default' }]
+      )
+      
       console.log('✅ Profile updated successfully!')
     } catch (error) {
       console.error('Unexpected error updating profile:', error)
+      Alert.alert(
+        'Error',
+        'An unexpected error occurred while updating your profile.',
+        [{ text: 'OK', style: 'default' }]
+      )
     } finally {
       setIsSavingProfile(false)
     }
@@ -456,15 +519,55 @@ export function DashboardScreen() {
   const isProfileValid = () => {
     if (!editedProfile) return false
     
-    const age = parseInt(editedProfile.age)
+    // Use our comprehensive validation
+    const fullNameValid = validateFullName(editedProfile.full_name || '')
+    const usernameValid = validateUsername(editedProfile.username || '')
+    const ageValid = validateAge(editedProfile.age || '')
+    const aboutMeValid = validateAboutMe(editedProfile.about_me || '')
+    const educationValid = validateEducationStatus(editedProfile.education_status || '')
+    const languagesValid = validateCodingLanguages(editedProfile.coding_languages || [])
+    
     return (
-      editedProfile.username &&
-      editedProfile.full_name &&
-      age >= 13 &&
-      editedProfile.education_status &&
-      editedProfile.coding_languages &&
-      editedProfile.coding_languages.length > 0
+      fullNameValid.isValid &&
+      usernameValid.isValid &&
+      ageValid.isValid &&
+      aboutMeValid.isValid &&
+      educationValid.isValid &&
+      languagesValid.isValid
     )
+  }
+
+  // Real-time field validation
+  const validateField = (fieldName: string, value: any) => {
+    let validation
+    
+    switch (fieldName) {
+      case 'full_name':
+        validation = validateFullName(value || '')
+        break
+      case 'username':
+        validation = validateUsername(value || '')
+        break
+      case 'age':
+        validation = validateAge(value || '')
+        break
+      case 'about_me':
+        validation = validateAboutMe(value || '')
+        break
+      case 'education_status':
+        validation = validateEducationStatus(value || '')
+        break
+      case 'coding_languages':
+        validation = validateCodingLanguages(value || [])
+        break
+      default:
+        return
+    }
+    
+    setValidationErrors(prev => ({
+      ...prev,
+      [fieldName]: validation.isValid ? '' : validation.error || ''
+    }))
   }
 
   // Privacy control handlers
@@ -865,37 +968,109 @@ export function DashboardScreen() {
                   <View style={{ flex: 1 }}>
                     {isEditingProfile ? (
                       <View style={{ gap: 8 }}>
-                        <TextInput
-                          style={{
-                            fontSize: 20,
-                            fontWeight: '700',
-                            color: '#0f172a',
-                            borderWidth: 2,
-                            borderColor: '#667eea',
-                            borderRadius: 8,
-                            paddingHorizontal: 12,
-                            paddingVertical: 8,
-                            backgroundColor: '#f8fafc'
-                          }}
-                          value={editedProfile?.full_name || ''}
-                          onChangeText={(text) => setEditedProfile({...editedProfile, full_name: text})}
-                          placeholder="Full Name"
-                        />
-                        <TextInput
-                          style={{
-                            fontSize: 14,
-                            color: '#64748b',
-                            borderWidth: 2,
-                            borderColor: '#e2e8f0',
-                            borderRadius: 8,
-                            paddingHorizontal: 12,
-                            paddingVertical: 6,
-                            backgroundColor: '#ffffff'
-                          }}
-                          value={editedProfile?.username || ''}
-                          onChangeText={(text) => setEditedProfile({...editedProfile, username: text.toLowerCase().replace(/[^a-z0-9_]/g, '')})}
-                          placeholder="username"
-                        />
+                        <View>
+                          <TextInput
+                            style={{
+                              fontSize: 20,
+                              fontWeight: '700',
+                              color: '#0f172a',
+                              borderWidth: 2,
+                              borderColor: (() => {
+                                if (validationErrors.full_name) return '#ef4444'
+                                if (editedProfile?.full_name && validateFullName(editedProfile.full_name).isValid) return '#10b981'
+                                return '#667eea'
+                              })(),
+                              borderRadius: 8,
+                              paddingHorizontal: 12,
+                              paddingVertical: 8,
+                              backgroundColor: '#f8fafc'
+                            }}
+                            value={editedProfile?.full_name || ''}
+                            onChangeText={(text) => {
+                              setEditedProfile({...editedProfile, full_name: text})
+                              validateField('full_name', text)
+                            }}
+                            placeholder="Full Name (First and Last)"
+                          />
+                          {validationErrors.full_name ? (
+                            <Text style={{
+                              fontSize: 12,
+                              color: '#ef4444',
+                              marginTop: 4,
+                              fontWeight: '500'
+                            }}>
+                              {validationErrors.full_name}
+                            </Text>
+                          ) : null}
+                          {editedProfile?.full_name && !validationErrors.full_name && validateFullName(editedProfile.full_name).isValid ? (
+                            <Text style={{
+                              fontSize: 12,
+                              color: '#10b981',
+                              marginTop: 4,
+                              fontWeight: '500'
+                            }}>
+                              ✓ Name looks good!
+                            </Text>
+                          ) : null}
+                        </View>
+                        <View>
+                          <TextInput
+                            style={{
+                              fontSize: 14,
+                              color: '#64748b',
+                              borderWidth: 2,
+                              borderColor: (() => {
+                                if (validationErrors.username) return '#ef4444'
+                                if (editedProfile?.username && validateUsername(editedProfile.username).isValid) return '#10b981'
+                                return '#e2e8f0'
+                              })(),
+                              borderRadius: 8,
+                              paddingHorizontal: 12,
+                              paddingVertical: 6,
+                              backgroundColor: '#ffffff'
+                            }}
+                            value={editedProfile?.username || ''}
+                            onChangeText={(text) => {
+                              const formatted = formatUsername(text)
+                              setEditedProfile({...editedProfile, username: formatted})
+                              validateField('username', formatted)
+                            }}
+                            placeholder="username (3-22 characters)"
+                          />
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                            <View>
+                              {validationErrors.username ? (
+                                <Text style={{
+                                  fontSize: 12,
+                                  color: '#ef4444',
+                                  fontWeight: '500'
+                                }}>
+                                  {validationErrors.username}
+                                </Text>
+                              ) : null}
+                              {editedProfile?.username && !validationErrors.username && validateUsername(editedProfile.username).isValid ? (
+                                <Text style={{
+                                  fontSize: 12,
+                                  color: '#10b981',
+                                  fontWeight: '500'
+                                }}>
+                                  ✓ Username available!
+                                </Text>
+                              ) : null}
+                            </View>
+                            <Text style={{
+                              fontSize: 12,
+                              color: (() => {
+                                const len = editedProfile?.username?.length || 0
+                                if (len > 22) return '#ef4444'
+                                if (len >= 18) return '#f59e0b'
+                                return '#64748b'
+                              })()
+                            }}>
+                              {editedProfile?.username?.length || 0}/22
+                            </Text>
+                          </View>
+                        </View>
                       </View>
                     ) : (
                       <>
@@ -923,27 +1098,45 @@ export function DashboardScreen() {
                                color: '#0f172a',
                                fontWeight: '600',
                                borderWidth: 2,
-                               borderColor: editedProfile?.age && parseInt(editedProfile.age) < 13 ? '#ef4444' : '#e2e8f0',
+                               borderColor: (() => {
+                                 if (validationErrors.age) return '#ef4444'
+                                 if (editedProfile?.age && validateAge(editedProfile.age).isValid) return '#10b981'
+                                 return '#e2e8f0'
+                               })(),
                                borderRadius: 8,
                                paddingHorizontal: 12,
                                paddingVertical: 8,
                                backgroundColor: '#ffffff'
                              }}
                              value={editedProfile?.age?.toString() || ''}
-                             onChangeText={(text) => setEditedProfile({...editedProfile, age: text.replace(/[^0-9]/g, '')})}
-                             placeholder="Age"
+                             onChangeText={(text) => {
+                               const numericText = text.replace(/[^0-9]/g, '')
+                               setEditedProfile({...editedProfile, age: numericText})
+                               validateField('age', numericText)
+                             }}
+                             placeholder="Age (13+)"
                              keyboardType="numeric"
                            />
-                           {editedProfile?.age && parseInt(editedProfile.age) < 13 && (
+                           {validationErrors.age ? (
                              <Text style={{
                                fontSize: 12,
                                color: '#ef4444',
                                marginTop: 4,
                                fontWeight: '500'
                              }}>
-                               Must be 13 or older
+                               {validationErrors.age}
                              </Text>
-                           )}
+                           ) : null}
+                           {editedProfile?.age && !validationErrors.age && validateAge(editedProfile.age).isValid ? (
+                             <Text style={{
+                               fontSize: 12,
+                               color: '#10b981',
+                               marginTop: 4,
+                               fontWeight: '500'
+                             }}>
+                               ✓ Age verified
+                             </Text>
+                           ) : null}
                          </View>
                        ) : (
                         <Text style={{ fontSize: 16, color: '#0f172a', fontWeight: '600' }}>
@@ -959,7 +1152,10 @@ export function DashboardScreen() {
                           {EDUCATION_OPTIONS.map((option) => (
                             <Pressable
                               key={option.value}
-                              onPress={() => setEditedProfile({...editedProfile, education_status: option.value})}
+                              onPress={() => {
+                                setEditedProfile({...editedProfile, education_status: option.value})
+                                validateField('education_status', option.value)
+                              }}
                               style={{
                                 flexDirection: 'row',
                                 alignItems: 'center',
@@ -982,6 +1178,16 @@ export function DashboardScreen() {
                               </Text>
                             </Pressable>
                           ))}
+                          {validationErrors.education_status ? (
+                            <Text style={{
+                              fontSize: 12,
+                              color: '#ef4444',
+                              fontWeight: '500',
+                              marginTop: 4
+                            }}>
+                              {validationErrors.education_status}
+                            </Text>
+                          ) : null}
                         </View>
                       ) : (
                         <Text style={{ fontSize: 16, color: '#0f172a', fontWeight: '600' }}>
@@ -1003,7 +1209,15 @@ export function DashboardScreen() {
                           {CODING_LANGUAGES.map((language) => (
                             <Pressable
                               key={language}
-                              onPress={() => handleLanguageToggle(language)}
+                              onPress={() => {
+                                handleLanguageToggle(language)
+                                // Validate after selection
+                                const currentLanguages = editedProfile?.coding_languages || []
+                                const newLanguages = currentLanguages.includes(language) 
+                                  ? currentLanguages.filter(l => l !== language)
+                                  : [...currentLanguages, language]
+                                validateField('coding_languages', newLanguages)
+                              }}
                               style={{
                                 borderWidth: 2,
                                 borderColor: editedProfile?.coding_languages?.includes(language) ? '#667eea' : '#e2e8f0',
@@ -1024,22 +1238,48 @@ export function DashboardScreen() {
                           ))}
                         </View>
                         
-                        {editedProfile?.coding_languages?.length > 0 && (
-                          <View style={{
-                            backgroundColor: '#f8fafc',
-                            borderRadius: 8,
-                            padding: 12,
-                            borderWidth: 1,
-                            borderColor: '#e2e8f0'
+                        {validationErrors.coding_languages ? (
+                          <Text style={{
+                            fontSize: 12,
+                            color: '#ef4444',
+                            fontWeight: '500',
+                            marginTop: 4
                           }}>
-                            <Text style={{ fontSize: 12, fontWeight: '600', color: '#374151', marginBottom: 4 }}>
-                              Selected ({editedProfile.coding_languages.length}):
-                            </Text>
-                            <Text style={{ fontSize: 12, color: '#64748b' }}>
-                              {editedProfile.coding_languages.join(', ')}
-                            </Text>
-                          </View>
-                        )}
+                            {validationErrors.coding_languages}
+                          </Text>
+                        ) : null}
+                        
+                                                  {editedProfile?.coding_languages?.length > 0 ? (
+                            <View style={{
+                              backgroundColor: editedProfile.coding_languages.length > 15 ? '#fef2f2' : '#f8fafc',
+                              borderRadius: 8,
+                              padding: 12,
+                              borderWidth: 1,
+                              borderColor: editedProfile.coding_languages.length > 15 ? '#fecaca' : '#e2e8f0'
+                            }}>
+                              <Text style={{ 
+                                fontSize: 12, 
+                                fontWeight: '600', 
+                                color: editedProfile.coding_languages.length > 15 ? '#dc2626' : '#374151', 
+                                marginBottom: 4 
+                              }}>
+                                Selected ({editedProfile.coding_languages.length}/15):
+                              </Text>
+                              <Text style={{ fontSize: 12, color: '#64748b' }}>
+                                {editedProfile.coding_languages.join(', ')}
+                              </Text>
+                              {editedProfile.coding_languages.length > 15 ? (
+                                <Text style={{
+                                  fontSize: 12,
+                                  color: '#dc2626',
+                                  fontWeight: '500',
+                                  marginTop: 4
+                                }}>
+                                  Please select no more than 15 languages to keep your profile focused
+                                </Text>
+                              ) : null}
+                            </View>
+                          ) : null}
                       </View>
                     ) : (
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -1080,23 +1320,38 @@ export function DashboardScreen() {
 
                   {isEditingProfile ? (
                     <View style={{ gap: 8 }}>
-                      <Text style={{
-                        fontSize: 14,
-                        color: '#374151',
-                        fontWeight: '500'
-                      }}>
-                        Bio
-                      </Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={{
+                          fontSize: 14,
+                          color: '#374151',
+                          fontWeight: '500'
+                        }}>
+                          Bio (Optional)
+                        </Text>
+                        <Text style={{
+                          fontSize: 12,
+                          color: getCharacterCountInfo(editedProfile?.about_me || '', 500).color
+                        }}>
+                          {getCharacterCountInfo(editedProfile?.about_me || '', 500).current}/500
+                        </Text>
+                      </View>
                       <TextInput
                         value={editedProfile?.about_me || ''}
-                        onChangeText={(text) => setEditedProfile(prev => ({ ...prev, about_me: text }))}
-                        placeholder="Tell us about yourself, your skills, and what makes you passionate about coding..."
+                        onChangeText={(text) => {
+                          setEditedProfile(prev => ({ ...prev, about_me: text }))
+                          validateField('about_me', text)
+                        }}
+                        placeholder="Tell us about yourself, your coding interests, experience, or what you're passionate about. Share your story in up to 500 characters..."
                         multiline
                         numberOfLines={4}
                         style={{
                           backgroundColor: '#ffffff',
                           borderWidth: 2,
-                          borderColor: '#e2e8f0',
+                          borderColor: (() => {
+                            if (validationErrors.about_me) return '#ef4444'
+                            if (editedProfile?.about_me && validateAboutMe(editedProfile.about_me).isValid) return '#10b981'
+                            return '#e2e8f0'
+                          })(),
                           borderRadius: 12,
                           padding: 12,
                           fontSize: 14,
@@ -1105,6 +1360,24 @@ export function DashboardScreen() {
                           minHeight: 100
                         }}
                       />
+                      {validationErrors.about_me ? (
+                        <Text style={{
+                          fontSize: 12,
+                          color: '#ef4444',
+                          fontWeight: '500'
+                        }}>
+                          {validationErrors.about_me}
+                        </Text>
+                      ) : null}
+                      {editedProfile?.about_me && !validationErrors.about_me && validateAboutMe(editedProfile.about_me).isValid && editedProfile.about_me.trim().length > 0 ? (
+                        <Text style={{
+                          fontSize: 12,
+                          color: '#10b981',
+                          fontWeight: '500'
+                        }}>
+                          ✓ Bio looks great!
+                        </Text>
+                      ) : null}
                     </View>
                   ) : (
                     <View style={{
