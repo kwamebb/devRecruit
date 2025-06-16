@@ -49,8 +49,18 @@ export type Database = {
           id: string
           username: string | null
           full_name: string | null
+          email: string | null
           avatar_url: string | null
+          about_me: string | null
+          age: number | null
+          education_status: string | null
+          coding_languages: string[] | null
           github_username: string | null
+          github_repository_count: number | null
+          github_commit_count: number | null
+          onboarding_completed: boolean | null
+          account_status: string | null
+          privacy_settings: Record<string, any> | null
           created_at: string
           updated_at: string
         }
@@ -58,8 +68,18 @@ export type Database = {
           id: string
           username?: string | null
           full_name?: string | null
+          email?: string | null
           avatar_url?: string | null
+          about_me?: string | null
+          age?: number | null
+          education_status?: string | null
+          coding_languages?: string[] | null
           github_username?: string | null
+          github_repository_count?: number | null
+          github_commit_count?: number | null
+          onboarding_completed?: boolean | null
+          account_status?: string | null
+          privacy_settings?: Record<string, any> | null
           created_at?: string
           updated_at?: string
         }
@@ -67,8 +87,18 @@ export type Database = {
           id?: string
           username?: string | null
           full_name?: string | null
+          email?: string | null
           avatar_url?: string | null
+          about_me?: string | null
+          age?: number | null
+          education_status?: string | null
+          coding_languages?: string[] | null
           github_username?: string | null
+          github_repository_count?: number | null
+          github_commit_count?: number | null
+          onboarding_completed?: boolean | null
+          account_status?: string | null
+          privacy_settings?: Record<string, any> | null
           updated_at?: string
         }
       }

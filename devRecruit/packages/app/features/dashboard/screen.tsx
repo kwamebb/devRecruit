@@ -22,6 +22,10 @@ import {
   exportSecurityReport,
   useSecurityTools 
 } from '../../utils/securityTools'
+import { 
+  getCachedGitHubStats,
+  GitHubStats 
+} from '../../utils/githubStats'
 
 type TabType = 'profile' | 'settings' | 'my-projects' | 'create-project' | 'browse-projects' | 'help'
 
@@ -83,6 +87,12 @@ export function DashboardScreen() {
   const [showDeveloperTools, setShowDeveloperTools] = useState(
     process.env.NODE_ENV === 'development' || user?.email === 'ekbotse1@coastal.edu'
   )
+  
+  // GitHub statistics state
+  const [githubStats, setGithubStats] = useState<GitHubStats | null>(null)
+  const [isLoadingGithubStats, setIsLoadingGithubStats] = useState(false)
+  
+  // About Me is now part of the main profile editing
 
   // Authentication guard - redirect if not authenticated
   useEffect(() => {
@@ -119,13 +129,20 @@ export function DashboardScreen() {
       }
 
       try {
+        console.log('🔍 Checking profile for user:', user.id)
+        
+        // Use maybeSingle() instead of single() to handle case where profile doesn't exist
         const { data: profile, error } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', user.id)
-          .single()
+          .maybeSingle()
 
+        console.log('📋 Profile query result:', { profile, error })
+
+        // If there's an error that's not "not found", log it
         if (error) {
+          console.error('❌ Profile lookup error:', error)
           logError({
             message: 'Failed to check onboarding status',
             level: 'error',
@@ -138,22 +155,79 @@ export function DashboardScreen() {
           return
         }
 
-        if (!profile?.onboarding_completed) {
-          logInfo('User redirected to complete onboarding', {
+        // If no profile exists, create one automatically
+        if (!profile) {
+          console.log('🆕 No profile found, creating one...')
+          
+          const { data: newProfile, error: createError } = await supabase
+            .from('profiles')
+            .insert({
+              id: user.id,
+              username: user.email?.split('@')[0] || 'user',
+              full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
+              email: user.email,
+              avatar_url: user.user_metadata?.avatar_url || user.user_metadata?.picture || '',
+              about_me: null,
+              github_username: user.user_metadata?.user_name || user.user_metadata?.login || '',
+              github_repository_count: 0,
+              github_commit_count: 0,
+              onboarding_completed: false,
+              account_status: 'active',
+              privacy_settings: {
+                showEmail: false,
+                showGithub: true,
+                analyticsConsent: true
+              }
+            })
+            .select()
+            .single()
+
+          if (createError) {
+            console.error('❌ Failed to create profile:', createError)
+            logError({
+              message: 'Failed to create new user profile',
+              level: 'error',
+              component: 'dashboard_onboarding',
+              userId: user?.id,
+              timestamp: new Date().toISOString(),
+              metadata: { error: createError.message, code: createError.code }
+            })
+            setCheckingOnboarding(false)
+            return
+          }
+
+          console.log('✅ Created new profile:', newProfile)
+          
+          // Redirect to onboarding since it's a new profile
+          logInfo('New user redirected to complete onboarding', {
             userId: user.id,
-            profileExists: !!profile,
-            onboardingCompleted: profile?.onboarding_completed
+            profileCreated: true
           })
           router.push('/onboarding')
           return
         }
 
+        // Check if onboarding is completed
+        if (!profile.onboarding_completed) {
+          console.log('📝 Profile found but onboarding not completed, redirecting...')
+          logInfo('User redirected to complete onboarding', {
+            userId: user.id,
+            profileExists: true,
+            onboardingCompleted: false
+          })
+          router.push('/onboarding')
+          return
+        }
+
+        console.log('✅ Profile loaded successfully:', profile)
         setUserProfile(profile)
         setCheckingOnboarding(false)
         
-        // Load privacy settings
+        // Load privacy settings and GitHub stats
         loadPrivacySettings()
+        loadGitHubStats()
       } catch (error) {
+        console.error('❌ Unexpected error during onboarding check:', error)
         logError({
           message: 'Unexpected error during onboarding check',
           level: 'error',
@@ -200,6 +274,35 @@ export function DashboardScreen() {
       setIsLoadingPrivacy(false)
     }
   }
+
+  // Load GitHub statistics
+  const loadGitHubStats = async () => {
+    if (!user) return
+    
+    setIsLoadingGithubStats(true)
+    try {
+      const result = await getCachedGitHubStats(user.id)
+      
+      if (result.success && result.stats) {
+        setGithubStats(result.stats)
+      } else {
+        console.log('No GitHub stats available:', result.error)
+      }
+    } catch (error) {
+      logError({
+        message: 'Failed to load GitHub statistics',
+        level: 'error',
+        component: 'github_stats',
+        userId: user?.id,
+        timestamp: new Date().toISOString(),
+        metadata: { error: error.message }
+      })
+    } finally {
+      setIsLoadingGithubStats(false)
+    }
+  }
+
+  // About Me is now handled in the main profile save function
 
   // Show loading while auth is loading or checking onboarding status
   if (loading || checkingOnboarding) {
@@ -293,6 +396,7 @@ export function DashboardScreen() {
         .update({
           username: editedProfile.username,
           full_name: editedProfile.full_name,
+          about_me: editedProfile.about_me,
           age: age,
           education_status: editedProfile.education_status,
           coding_languages: editedProfile.coding_languages,
@@ -958,6 +1062,272 @@ export function DashboardScreen() {
                   </View>
                 </View>
 
+                {/* About Me Section */}
+                <View style={{ 
+                  borderTopWidth: 1, 
+                  borderTopColor: '#f1f5f9', 
+                  paddingTop: 20,
+                  marginTop: 20
+                }}>
+                  <Text style={{ 
+                    fontSize: 12, 
+                    color: '#64748b', 
+                    fontWeight: '600',
+                    marginBottom: 16
+                  }}>
+                    ABOUT ME
+                  </Text>
+
+                  {isEditingProfile ? (
+                    <View style={{ gap: 8 }}>
+                      <Text style={{
+                        fontSize: 14,
+                        color: '#374151',
+                        fontWeight: '500'
+                      }}>
+                        Bio
+                      </Text>
+                      <TextInput
+                        value={editedProfile?.about_me || ''}
+                        onChangeText={(text) => setEditedProfile(prev => ({ ...prev, about_me: text }))}
+                        placeholder="Tell us about yourself, your skills, and what makes you passionate about coding..."
+                        multiline
+                        numberOfLines={4}
+                        style={{
+                          backgroundColor: '#ffffff',
+                          borderWidth: 2,
+                          borderColor: '#e2e8f0',
+                          borderRadius: 12,
+                          padding: 12,
+                          fontSize: 14,
+                          color: '#0f172a',
+                          textAlignVertical: 'top',
+                          minHeight: 100
+                        }}
+                      />
+                    </View>
+                  ) : (
+                    <View style={{
+                      backgroundColor: '#f8fafc',
+                      borderRadius: 12,
+                      padding: 16
+                    }}>
+                      <Text style={{
+                        fontSize: 14,
+                        color: '#475569',
+                        lineHeight: 20
+                      }}>
+                        {userProfile?.about_me || 'No bio added yet. Click "Edit Profile" to add information about yourself!'}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* GitHub Statistics Section */}
+                <View style={{ 
+                  borderTopWidth: 1, 
+                  borderTopColor: '#f1f5f9', 
+                  paddingTop: 20,
+                  marginTop: 20
+                }}>
+                  <View style={{ 
+                    flexDirection: 'row', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center',
+                    marginBottom: 16 
+                  }}>
+                    <Text style={{ 
+                      fontSize: 12, 
+                      color: '#64748b', 
+                      fontWeight: '600' 
+                    }}>
+                      GITHUB STATISTICS
+                    </Text>
+                    
+                    <Text style={{
+                      fontSize: 10,
+                      color: '#94a3b8',
+                      fontWeight: '400'
+                    }}>
+                      Updates daily
+                    </Text>
+                  </View>
+
+                  {isLoadingGithubStats ? (
+                    <View style={{
+                      alignItems: 'center',
+                      paddingVertical: 24
+                    }}>
+                      <Text style={{
+                        fontSize: 14,
+                        color: '#64748b'
+                      }}>
+                        Loading GitHub statistics...
+                      </Text>
+                    </View>
+                  ) : githubStats ? (
+                    <View style={{
+                      backgroundColor: '#f8fafc',
+                      borderRadius: 12,
+                      padding: 16,
+                      gap: 12
+                    }}>
+                                             {/* GitHub Username */}
+                       <View style={{
+                         flexDirection: 'row',
+                         alignItems: 'center',
+                         gap: 8
+                       }}>
+                         <Text style={{
+                           fontSize: 14,
+                           color: '#475569',
+                           fontWeight: '500'
+                         }}>
+                           Username:
+                         </Text>
+                         <Pressable
+                           onPress={() => {
+                             if (typeof window !== 'undefined') {
+                               window.open(`https://github.com/${githubStats.username}`, '_blank')
+                             }
+                           }}
+                           onHoverIn={() => setHoveredButton('github-username')}
+                           onHoverOut={() => setHoveredButton(null)}
+                           style={{
+                             backgroundColor: hoveredButton === 'github-username' ? '#e0e7ff' : '#f1f5f9',
+                             paddingHorizontal: 8,
+                             paddingVertical: 4,
+                             borderRadius: 6,
+                             borderWidth: 1,
+                             borderColor: hoveredButton === 'github-username' ? '#667eea' : '#e2e8f0',
+                             cursor: 'pointer'
+                           }}
+                         >
+                           <View style={{
+                             flexDirection: 'row',
+                             alignItems: 'center',
+                             gap: 4
+                           }}>
+                             <Text style={{
+                               fontSize: 14,
+                               color: '#667eea',
+                               fontWeight: '600',
+                               fontFamily: 'monospace'
+                             }}>
+                               @{githubStats.username}
+                             </Text>
+                             <Text style={{
+                               fontSize: 12,
+                               color: '#94a3b8'
+                             }}>
+                               ↗
+                             </Text>
+                           </View>
+                         </Pressable>
+                       </View>
+
+                      {/* Repository Count */}
+                      <View style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 8
+                      }}>
+                        <Text style={{
+                          fontSize: 14,
+                          color: '#475569',
+                          fontWeight: '500'
+                        }}>
+                          Public Repositories:
+                        </Text>
+                        <View style={{
+                          backgroundColor: '#dbeafe',
+                          paddingHorizontal: 8,
+                          paddingVertical: 2,
+                          borderRadius: 6
+                        }}>
+                          <Text style={{
+                            fontSize: 14,
+                            color: '#1e40af',
+                            fontWeight: '700'
+                          }}>
+                            {githubStats.repositoryCount}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Commit Count */}
+                      <View style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 8
+                      }}>
+                        <Text style={{
+                          fontSize: 14,
+                          color: '#475569',
+                          fontWeight: '500'
+                        }}>
+                          Estimated Commits:
+                        </Text>
+                        <View style={{
+                          backgroundColor: '#dcfce7',
+                          paddingHorizontal: 8,
+                          paddingVertical: 2,
+                          borderRadius: 6
+                        }}>
+                          <Text style={{
+                            fontSize: 14,
+                            color: '#166534',
+                            fontWeight: '700'
+                          }}>
+                            {githubStats.commitCount}+
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Last Updated */}
+                      <View style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 8,
+                        marginTop: 4
+                      }}>
+                        <Text style={{
+                          fontSize: 12,
+                          color: '#64748b'
+                        }}>
+                          Last updated: {new Date(githubStats.lastUpdated).toLocaleDateString()}
+                        </Text>
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={{
+                      backgroundColor: '#fef3c7',
+                      borderWidth: 1,
+                      borderColor: '#fbbf24',
+                      borderRadius: 12,
+                      padding: 16,
+                      alignItems: 'center',
+                      gap: 8
+                    }}>
+                      <Text style={{
+                        fontSize: 14,
+                        color: '#92400e',
+                        fontWeight: '500',
+                        textAlign: 'center'
+                      }}>
+                        No GitHub account linked
+                      </Text>
+                      <Text style={{
+                        fontSize: 12,
+                        color: '#a16207',
+                        textAlign: 'center'
+                      }}>
+                        Sign in with GitHub to display your coding statistics
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                
                 {/* Edit Actions */}
                 {isEditingProfile && (
                   <View style={{
